@@ -11,6 +11,23 @@ export type ListQuery = {
   sourceId?: string;
 };
 
+export type IngestTrigger = "cli" | "api" | "schedule";
+export type IngestRunStatus = "running" | "ok" | "partial" | "error";
+
+export type IngestRun = {
+  id: string;
+  sourceId: string;
+  trigger: IngestTrigger;
+  status: IngestRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  discovered: number;
+  succeeded: number;
+  failed: number;
+  error: string | null;
+};
+
 export class IntelStore {
   private readonly db: Database;
 
@@ -100,6 +117,79 @@ export class IntelStore {
     return this.db.query<{ n: number }, []>("SELECT COUNT(*) AS n FROM intel").get()?.n ?? 0;
   }
 
+  startIngestRun(input: { sourceId: string; trigger: IngestTrigger; startedAt: string }): IngestRun {
+    const run: IngestRun = {
+      id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+      sourceId: input.sourceId,
+      trigger: input.trigger,
+      status: "running",
+      startedAt: input.startedAt,
+      finishedAt: null,
+      durationMs: null,
+      discovered: 0,
+      succeeded: 0,
+      failed: 0,
+      error: null,
+    };
+    this.db
+      .query(
+        `INSERT INTO ingest_runs (id, source_id, trigger, status, started_at, finished_at, duration_ms, discovered, succeeded, failed, error)
+         VALUES ($id, $source_id, $trigger, $status, $started_at, $finished_at, $duration_ms, $discovered, $succeeded, $failed, $error)`,
+      )
+      .run(runBinds(run));
+    return run;
+  }
+
+  finishIngestRun(
+    id: string,
+    patch: Pick<IngestRun, "status" | "finishedAt" | "durationMs" | "discovered" | "succeeded" | "failed" | "error">,
+  ): IngestRun {
+    const current = this.getIngestRun(id);
+    if (!current) throw new Error(`ingest run not found: ${id}`);
+    const run: IngestRun = { ...current, ...patch };
+    this.db
+      .query(
+        `UPDATE ingest_runs SET
+           status=$status, finished_at=$finished_at, duration_ms=$duration_ms,
+           discovered=$discovered, succeeded=$succeeded, failed=$failed, error=$error
+         WHERE id=$id`,
+      )
+      .run({
+        $id: run.id,
+        $status: run.status,
+        $finished_at: run.finishedAt,
+        $duration_ms: run.durationMs,
+        $discovered: run.discovered,
+        $succeeded: run.succeeded,
+        $failed: run.failed,
+        $error: run.error,
+      });
+    return run;
+  }
+
+  getIngestRun(id: string): IngestRun | null {
+    const row = this.db
+      .query<IngestRunRow, [string]>("SELECT * FROM ingest_runs WHERE id = ?")
+      .get(id);
+    return row ? rowToRun(row) : null;
+  }
+
+  listIngestRuns(query: { sourceId?: string; limit?: number } = {}): IngestRun[] {
+    const limit = query.limit ?? 50;
+    if (query.sourceId) {
+      return this.db
+        .query<IngestRunRow, [string, number]>(
+          "SELECT * FROM ingest_runs WHERE source_id = ? ORDER BY started_at DESC LIMIT ?",
+        )
+        .all(query.sourceId, limit)
+        .map(rowToRun);
+    }
+    return this.db
+      .query<IngestRunRow, [number]>("SELECT * FROM ingest_runs ORDER BY started_at DESC LIMIT ?")
+      .all(limit)
+      .map(rowToRun);
+  }
+
   private migrate(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS intel (
@@ -118,6 +208,67 @@ export class IntelStore {
       CREATE INDEX IF NOT EXISTS intel_type_idx ON intel(type);
       CREATE INDEX IF NOT EXISTS intel_region_idx ON intel(region);
       CREATE INDEX IF NOT EXISTS intel_biddable_idx ON intel(biddable);
+      CREATE TABLE IF NOT EXISTS ingest_runs (
+        id TEXT PRIMARY KEY,
+        source_id TEXT NOT NULL,
+        trigger TEXT NOT NULL,
+        status TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        duration_ms INTEGER,
+        discovered INTEGER NOT NULL DEFAULT 0,
+        succeeded INTEGER NOT NULL DEFAULT 0,
+        failed INTEGER NOT NULL DEFAULT 0,
+        error TEXT
+      );
+      CREATE INDEX IF NOT EXISTS ingest_runs_started_idx ON ingest_runs(started_at);
+      CREATE INDEX IF NOT EXISTS ingest_runs_source_idx ON ingest_runs(source_id);
     `);
   }
+}
+
+type IngestRunRow = {
+  id: string;
+  source_id: string;
+  trigger: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  duration_ms: number | null;
+  discovered: number;
+  succeeded: number;
+  failed: number;
+  error: string | null;
+};
+
+function runBinds(run: IngestRun) {
+  return {
+    $id: run.id,
+    $source_id: run.sourceId,
+    $trigger: run.trigger,
+    $status: run.status,
+    $started_at: run.startedAt,
+    $finished_at: run.finishedAt,
+    $duration_ms: run.durationMs,
+    $discovered: run.discovered,
+    $succeeded: run.succeeded,
+    $failed: run.failed,
+    $error: run.error,
+  };
+}
+
+function rowToRun(row: IngestRunRow): IngestRun {
+  return {
+    id: row.id,
+    sourceId: row.source_id,
+    trigger: row.trigger as IngestTrigger,
+    status: row.status as IngestRunStatus,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+    durationMs: row.duration_ms,
+    discovered: row.discovered,
+    succeeded: row.succeeded,
+    failed: row.failed,
+    error: row.error,
+  };
 }

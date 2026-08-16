@@ -28,6 +28,7 @@ LexSource 是律所案源情报库，不是法律搜索引擎，也不是爬虫�
 bun install
 bun test
 bun src/cli.ts ingest-fixtures
+bun src/cli.ts ingest --source ccgp --url tests/fixtures/tenders/ccgp-legal-counsel.html
 bun --hot src/server.ts
 ```
 

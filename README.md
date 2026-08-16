@@ -18,6 +18,7 @@
 - 按类型、关键词、可投标过滤
 - 导出 Markdown、Word、PDF
 - 打开本地情报台
+- 从 URL 或本地 HTML 采集入库（ccgp / ggzy / 指导性案例）；定时轮询默认关闭
 
 项目画像、非目标和验收矩阵见 [docs/roadmap.md](docs/roadmap.md)。Agent 硬约束见 [AGENTS.md](AGENTS.md)。
 
@@ -39,9 +40,13 @@ bun --hot src/server.ts
 浏览器打开 `http://127.0.0.1:8787`。数据库默认写在 `var/lexsource.db`。
 
 ```bash
+bun src/cli.ts ingest --source ccgp --url tests/fixtures/tenders/ccgp-legal-counsel.html
 curl -s http://127.0.0.1:8787/api/health
 curl -s 'http://127.0.0.1:8787/api/intel?type=tender&biddable=1'
+curl -s -X POST http://127.0.0.1:8787/api/sources/ccgp/run
 ```
+
+定时轮询默认关闭。打开时设置 `LEXSOURCE_POLL_ENABLED=1`，间隔默认 1 小时（`LEXSOURCE_POLL_INTERVAL_MS`，源列表 `LEXSOURCE_POLL_SOURCES=ccgp,ggzy`）。测试用注入 HTTP / 录制响应，不打外网。
 
 手工入库：
 

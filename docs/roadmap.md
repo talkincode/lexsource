@@ -61,6 +61,10 @@ LexSource 是给律所使用的案源情报库：把全国法律服务招投标�
 
   本地单页：列表、筛选、详情、导出链接。证据：`src/web/dashboard.ts`、`tests/api.test.ts`。
 
+- **可调度采集**
+
+  ccgp / ggzy 可从 URL 或本地 HTML 入库；HTTP 可注入、限速、友好 User-Agent，禁采裁判文书网。内置轮询默认关闭。每次采集写开始/成功/失败/耗时日志，不记原文或查询串。证据：`src/sources/http.ts`、`src/pipeline/run.ts`、`src/pipeline/poller.ts`、`tests/fetch.test.ts`、`tests/run.test.ts`、`tests/api.test.ts`。
+
 ## 非目标（铁律）
 
 - 不自动采集中国裁判文书网，也不把该网当作默认可爬源。原因：访问受限且合规风险高。律师上传或商业授权 API 另计。
@@ -123,5 +127,6 @@ LexSource 是给律所使用的案源情报库：把全国法律服务招投标�
 | 检索与过滤 | 低 | ✅ | 不适用（只读查询） | 不适用 | 不适用（不修改状态） | `tests/api.test.ts` |
 | 三格式导出 | 中 | ✅ | ✅ 缺失条目 404 | 不适用 | 不适用（导出不改库） | `tests/export.test.ts`、`tests/api.test.ts` |
 | Web 情报台 | 低 | ✅ 页面与 API 契约 | 不适用（只读壳） | 不适用 | 不适用 | `tests/api.test.ts` dashboard html is served |
+| 可调度采集 | 高 | ✅ 录制 listing+详情入库 | ✅ 禁采主机 / HTTP 500 / 无 seed / 本地路径拒 API | 不适用（同上） | ✅ 失败条目不落库，run 记失败数；同源并发拒绝 | `tests/fetch.test.ts`、`tests/run.test.ts`、`tests/api.test.ts` |
 
 缺口与最低期望：权限系统尚未存在，矩阵标“不适用”；一旦加入登录，必须补“有权/无权”两条 E2E。PDF 中文可读性仍是方向，不是当前已验收能力。
