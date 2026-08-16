@@ -35,7 +35,14 @@ export function dashboardHtml(): string {
     .meta { color: var(--mute); font-size: 14px; text-align: right; }
     main { display: grid; grid-template-columns: 280px 1fr 360px; min-height: calc(100vh - 96px); }
     aside, section, article { padding: 22px 24px; }
-    aside { border-right: 1px solid var(--rule); }
+    aside { border-right: 1px solid var(--rule); overflow-y: auto; }
+    h3 { font-size: 12px; letter-spacing: .16em; color: var(--gold); font-weight: 600; margin: 22px 0 8px; }
+    .row { display: flex; gap: 8px; }
+    .row button { margin-top: 8px; }
+    button.ghost { background: var(--panel); color: var(--ink); margin-top: 8px; }
+    .runs, .subs { font-size: 13px; color: var(--mute); }
+    .run, .sub { padding: 8px 0; border-bottom: 1px solid #e6dcc4; }
+    .sub b { display: block; color: var(--ink); font-size: 14px; }
     article { border-left: 1px solid var(--rule); background: var(--panel); }
     label { display: block; font-size: 12px; letter-spacing: .12em; color: var(--gold); margin: 14px 0 6px; }
     input, select, textarea, button {
@@ -93,8 +100,38 @@ export function dashboardHtml(): string {
       <input id="q" placeholder="法律顾问 / 指导性案例" />
       <label><input id="biddable" type="checkbox" style="width:auto" /> 仅可投标</label>
       <button id="reload">刷新情报</button>
+      <h3>运行采集</h3>
+      <div class="row">
+        <button id="run-ccgp" type="button">ccgp</button>
+        <button id="run-ggzy" type="button">ggzy</button>
+      </div>
+      <div class="runs" id="runs">采集记录加载中…</div>
+      <h3>订阅推送</h3>
+      <label>名称</label>
+      <input id="sub-name" placeholder="北京常年顾问" />
+      <label>类型</label>
+      <select id="sub-type">
+        <option value="tender">招标情报</option>
+        <option value="major_case">重大案件</option>
+      </select>
+      <label>地域</label>
+      <input id="sub-region" placeholder="北京" />
+      <label>服务类型</label>
+      <select id="sub-service">
+        <option value="">不限</option>
+        <option value="general_counsel">常年法律顾问</option>
+        <option value="special_project">专项法律服务</option>
+        <option value="litigation">诉讼仲裁</option>
+        <option value="other">其他法律服务</option>
+      </select>
+      <label>预算下限</label>
+      <input id="sub-min" type="number" min="0" placeholder="元" />
+      <label>预算上限</label>
+      <input id="sub-max" type="number" min="0" placeholder="元" />
+      <button id="sub-create" type="button">创建订阅</button>
+      <div class="subs" id="subs"></div>
       <p style="color:var(--mute);font-size:13px;line-height:1.55">
-        公开招标走政采网与公共资源交易平台；重大案件只收最高法公开案例与交叉确认材料，不爬裁判文书网。
+        公开招标走政采网与公共资源交易平台；重大案件只收最高法公开案例与交叉确认材料，不爬裁判文书网。不可投标的招标不会推送。
       </p>
     </aside>
     <section id="list"></section>
@@ -142,12 +179,73 @@ export function dashboardHtml(): string {
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
       }[ch]));
     }
-    $("reload").onclick = () => { loadHealth(); loadList(); };
+    async function loadRuns() {
+      const data = await fetch("/api/ingest-runs").then((r) => r.json());
+      $("runs").innerHTML = (data.runs || []).slice(0, 8).map((run) => {
+        return '<div class="run">' + escapeHtml(run.sourceId) + " · " +
+          escapeHtml(run.status) + " · 始 " + escapeHtml((run.startedAt || "").slice(11, 19)) +
+          " · 成功" + run.succeeded + " 失败" + run.failed +
+          " · " + (run.durationMs == null ? "-" : run.durationMs + "ms") + "</div>";
+      }).join("") || "<p>暂无采集记录。</p>";
+    }
+    async function runSource(id) {
+      await fetch("/api/sources/" + id + "/run", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      await loadRuns();
+      await loadHealth();
+      await loadList();
+    }
+    async function loadSubs() {
+      const data = await fetch("/api/subscriptions").then((r) => r.json());
+      $("subs").innerHTML = (data.subscriptions || []).map((sub) => {
+        const rule = [sub.region || "全国", sub.serviceType || "不限服务",
+          sub.budgetMin != null ? "≥" + sub.budgetMin : "",
+          sub.budgetMax != null ? "≤" + sub.budgetMax : ""].filter(Boolean).join(" · ");
+        return '<div class="sub" data-id="' + sub.id + '"><b>' + escapeHtml(sub.name) + '</b>' +
+          escapeHtml(sub.type) + " · " + escapeHtml(rule) +
+          '<button class="ghost preview" type="button">预览</button>' +
+          '<button class="ghost remove" type="button">删除</button></div>';
+      }).join("") || "<p>尚无订阅。</p>";
+      for (const node of document.querySelectorAll(".sub")) {
+        node.querySelector(".preview").addEventListener("click", async () => {
+          const res = await fetch("/api/subscriptions/" + node.dataset.id + "/preview", { method: "POST" });
+          const body = await res.json();
+          $("detail").innerHTML = "<h2>订阅预览</h2><pre>" + escapeHtml(JSON.stringify({
+            items: (body.items || []).map((item) => item.title),
+            withheld: body.withheld || []
+          }, null, 2)) + "</pre>";
+        });
+        node.querySelector(".remove").addEventListener("click", async () => {
+          await fetch("/api/subscriptions/" + node.dataset.id, { method: "DELETE" });
+          await loadSubs();
+        });
+      }
+    }
+    $("sub-create").onclick = async () => {
+      const body = {
+        name: $("sub-name").value,
+        type: $("sub-type").value,
+        region: $("sub-region").value,
+        serviceType: $("sub-service").value,
+        budgetMin: $("sub-min").value,
+        budgetMax: $("sub-max").value
+      };
+      await fetch("/api/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      await loadSubs();
+    };
+    $("reload").onclick = () => { loadHealth(); loadList(); loadRuns(); loadSubs(); };
+    $("run-ccgp").onclick = () => runSource("ccgp");
+    $("run-ggzy").onclick = () => runSource("ggzy");
     $("type").onchange = loadList;
     $("biddable").onchange = loadList;
     $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") loadList(); });
     loadHealth();
     loadList();
+    loadRuns();
+    loadSubs();
   </script>
 </body>
 </html>`;

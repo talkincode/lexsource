@@ -22,6 +22,29 @@ async function recordedCcgp() {
   });
 }
 
+test("finishedAt and duration use injected now instead of Date.now", async () => {
+  resetInflightForTests();
+  const store = new IntelStore(":memory:");
+  const file = new URL("./fixtures/tenders/ccgp-legal-counsel.html", import.meta.url).pathname;
+  let tick = at.getTime();
+  const now = () => {
+    tick += 400;
+    return new Date(tick);
+  };
+  const run = await runSourceIngest({
+    store,
+    sourceId: "ccgp",
+    target: file,
+    trigger: "cli",
+    now,
+  });
+  expect(run.startedAt).toBe(new Date(at.getTime() + 400).toISOString());
+  expect(run.finishedAt).toBe(new Date(tick).toISOString());
+  expect(run.durationMs).toBe(Date.parse(run.finishedAt ?? "") - Date.parse(run.startedAt));
+  expect(run.durationMs).toBeGreaterThan(0);
+  store.close();
+});
+
 test("run from local html file writes one item and a run log", async () => {
   resetInflightForTests();
   const store = new IntelStore(":memory:");

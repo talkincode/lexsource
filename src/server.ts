@@ -1,4 +1,6 @@
 import { createApp } from "./api/app";
+import { defaultSink } from "./notify/deliver";
+import { notifySubscriptions } from "./pipeline/notify";
 import { pollerConfigFromEnv, startPoller } from "./pipeline/poller";
 import { runSourceIngest } from "./pipeline/run";
 import { createHttpClient } from "./sources/http";
@@ -8,7 +10,8 @@ const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.LEXSOURCE_DB ?? "var/lexsource.db";
 const store = new IntelStore(dbPath);
 const fetchHtml = createHttpClient();
-const app = createApp({ store, fetchHtml });
+const deliver = defaultSink();
+const app = createApp({ store, fetchHtml, deliver });
 const poller = startPoller({
   ...pollerConfigFromEnv(),
   run: (sourceId) =>
@@ -17,6 +20,7 @@ const poller = startPoller({
       sourceId,
       http: fetchHtml,
       trigger: "schedule",
+      onIngested: (item) => notifySubscriptions({ store, item, sink: deliver }),
     }),
 });
 

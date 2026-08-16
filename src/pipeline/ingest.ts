@@ -16,7 +16,14 @@ export type IngestResult =
   | { ok: true; item: IntelItem }
   | { ok: false; error: string; stage: "parse" | "extract" | "verify" | "store" };
 
-export function ingestDocument(store: IntelStore, input: IngestInput, at = new Date()): IngestResult {
+export type AfterIngest = (item: IntelItem) => void;
+
+export function ingestDocument(
+  store: IntelStore,
+  input: IngestInput,
+  at = new Date(),
+  afterIngest?: AfterIngest,
+): IngestResult {
   let doc: RawDocument;
   try {
     const source = getSource(input.sourceId);
@@ -39,6 +46,7 @@ export function ingestDocument(store: IntelStore, input: IngestInput, at = new D
     }
     IntelItemSchema.parse(verified);
     const saved = store.upsert(verified);
+    afterIngest?.(saved);
     return { ok: true, item: saved };
   } catch (error) {
     return {
