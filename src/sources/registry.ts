@@ -1,14 +1,12 @@
-import { ccgpAdapter } from "./ccgp";
-import { ggzyAdapter } from "./ggzy";
-import { spcAdapter } from "./spc";
+import { CHANNELS, getChannel, type CollectionChannel } from "../agents/channels";
+import { htmlToDocument } from "./page";
+import { extractLinks } from "./page";
 import type { SourceAdapter } from "./types";
 
-export const sourceRegistry: SourceAdapter[] = [ccgpAdapter, ggzyAdapter, spcAdapter];
-
 export function getSource(id: string): SourceAdapter {
-  const found = sourceRegistry.find((source) => source.id === id);
-  if (!found) throw new Error(`Unknown source: ${id}`);
-  return found;
+  const channel = getChannel(id);
+  if (!channel) throw new Error(`Unknown source: ${id}`);
+  return channelToAdapter(channel);
 }
 
 export function listSources(): Array<
@@ -16,13 +14,30 @@ export function listSources(): Array<
     fetchable: boolean;
   }
 > {
-  return sourceRegistry.map((source) => ({
-    id: source.id,
-    name: source.name,
-    kind: source.kind,
-    region: source.region,
-    description: source.description,
-    seedUrl: source.seedUrl,
-    fetchable: Boolean(source.seedUrl || source.discover),
+  return CHANNELS.map((channel) => ({
+    id: channel.id,
+    name: channel.name,
+    kind: channel.kind,
+    region: channel.region,
+    description: channel.hints,
+    seedUrl: channel.seedUrls[0],
+    fetchable: channel.seedUrls.length > 0,
   }));
+}
+
+function channelToAdapter(channel: CollectionChannel): SourceAdapter {
+  return {
+    id: channel.id,
+    name: channel.name,
+    kind: channel.kind,
+    region: channel.region,
+    description: channel.hints,
+    seedUrl: channel.seedUrls[0],
+    parse(input) {
+      return htmlToDocument({ sourceId: channel.id, sourceUrl: input.sourceUrl, html: input.html, text: input.text });
+    },
+    discover(html, listingUrl) {
+      return extractLinks(html, listingUrl).map((link) => link.url);
+    },
+  };
 }

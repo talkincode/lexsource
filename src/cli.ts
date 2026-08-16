@@ -1,11 +1,13 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { defaultSink } from "./notify/deliver";
+import { createAzureComplete } from "./agents/runtime";
+import { createDeterministicCollector } from "./agents/stub";
 import { ingestDocument } from "./pipeline/ingest";
-import { notifySubscriptions } from "./pipeline/notify";
 import { runSourceIngest } from "./pipeline/run";
 import { createHttpClient } from "./sources/http";
 import { IntelStore } from "./store/db";
+import type { Role } from "./domain/auth";
+import { isRole } from "./domain/auth";
 
 const dbPath = process.env.LEXSOURCE_DB ?? "var/lexsource.db";
 
@@ -19,11 +21,30 @@ async function main() {
     await ingestTarget(flags);
     return;
   }
+  if (command === "create-user") {
+    await createUser(flags);
+    return;
+  }
   console.error("Usage: bun src/cli.ts ingest-fixtures");
   console.error(
     "       bun src/cli.ts ingest --source <ccgp|ggzy|spc-guiding> --url <https://...|./file.html>",
   );
+  console.error("       bun src/cli.ts create-user --username <name> --password <secret> --role <admin|lawyer>");
   process.exit(1);
+}
+
+async function createUser(flags: Record<string, string>) {
+  const username = flags.username;
+  const password = flags.password;
+  const role = flags.role as Role | undefined;
+  if (!username || !password || !role || !isRole(role)) {
+    console.error("Usage: bun src/cli.ts create-user --username <name> --password <secret> --role <admin|lawyer>");
+    process.exit(1);
+  }
+  const store = new IntelStore(dbPath);
+  const user = await store.createUser({ username, password, role });
+  store.close();
+  console.log(JSON.stringify({ ok: true, id: user.id, username: user.username, role: user.role }));
 }
 
 async function ingestTarget(flags: Record<string, string>) {
@@ -37,14 +58,17 @@ async function ingestTarget(flags: Record<string, string>) {
   }
 
   const store = new IntelStore(dbPath);
-  const sink = defaultSink();
+  const complete =
+    process.env.LEXSOURCE_TEST_COLLECTOR === "1"
+      ? createDeterministicCollector()
+      : createAzureComplete() ?? undefined;
   const run = await runSourceIngest({
     store,
     sourceId,
     target: url,
     http: createHttpClient(),
     trigger: "cli",
-    onIngested: (item) => notifySubscriptions({ store, item, sink }),
+    complete,
   });
   store.close();
   console.log(
@@ -53,6 +77,7 @@ async function ingestTarget(flags: Record<string, string>) {
       sourceId: run.sourceId,
       discovered: run.discovered,
       succeeded: run.succeeded,
+      skipped: run.skipped,
       failed: run.failed,
       durationMs: run.durationMs,
       error: run.error,
@@ -63,7 +88,6 @@ async function ingestTarget(flags: Record<string, string>) {
 
 async function ingestFixtures() {
   const store = new IntelStore(dbPath);
-  const sink = defaultSink();
   const root = join(import.meta.dir, "..", "tests", "fixtures");
   const files = [
     ...(await listHtml(join(root, "tenders"))),
@@ -75,11 +99,17 @@ async function ingestFixtures() {
   for (const file of files) {
     const html = await Bun.file(file).text();
     const meta = parseMeta(html);
-    const result = ingestDocument(store, {
-      sourceId: meta.sourceId,
-      sourceUrl: meta.sourceUrl,
-      html,
-    }, new Date(), (item) => notifySubscriptions({ store, item, sink }));
+    const result = await ingestDocument(
+      store,
+      {
+        sourceId: meta.sourceId,
+        sourceUrl: meta.sourceUrl,
+        html,
+      },
+      new Date(),
+      undefined,
+      { decision: { accept: true, reason: "curated fixture" } },
+    );
     if (result.ok) {
       ok += 1;
       console.log(JSON.stringify({ status: "ok", file, id: result.item.id, title: result.item.title }));

@@ -126,3 +126,9 @@ export const CASE_CLASS_LABEL: Record<CaseClass, string> = {
   reference: "参考性案例",
   public_impact: "社会重大影响案件",
 };
+
+export const LAW_FIRM_ANGLE_LABEL: Record<LawFirmAngle, string> = {
+  marketing: "市场拓展",
+  precedent: "办案参考",
+  risk: "风险合规",
+};

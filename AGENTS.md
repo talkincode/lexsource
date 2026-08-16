@@ -2,11 +2,17 @@
 
 项目画像、非目标和完整验收矩阵在 [docs/roadmap.md](docs/roadmap.md)。改代码前先读它。
 
-LexSource 是律所案源情报库，不是法律搜索引擎，也不是爬虫实验场。
+LexSource 是律所内部的自动情报系统：由内部采集 Agent 按可配置日程采集法律服务招投标与案件情报。律师登录后直接查看已采好、已筛过的结果。它不是公开网站，不是法律搜索引擎，不是订阅推送产品，也不是爬虫实验场。
 
 ## 核心边界（MUST）
 
 - MUST 使用 Bun + TypeScript。用 `bun` 跑脚本和测试，不要引入 Node 工具链或 Vite。
+- MUST 未登录不得访问情报台，也不得通过 API 读取或写入情报。这是所内系统，不是公开网站。
+- MUST 以定时采集 Agent 为运行核心。招标与案件按所内可配置周期自动采集；人打开看到的是已入库成品。
+- MUST 把法律相关性判定做在采集侧。非法律服务标讯、无关信息不得进入律师日常视图。
+- MUST NOT 把检索、过滤、关键词拼装做成产品主交互。辅助查找可以有，首页必须是已采集结果。
+- MUST NOT 把订阅推送（邮件 / 企微 / webhook / outbox 匹配投递）做成产品能力。
+- MUST NOT 把采集 Agent 做成聊天机器人或「你问我搜」的对话检索。
 - MUST NOT 自动采集 `wenshu.court.gov.cn`。律师上传与商业授权 API 可走同一入库管道。
 - MUST NOT 在抽取结果未通过 schema 与验证前把它标为 `verified`。
 - MUST NOT 把过期或验证失败的招标显示为可投标。
@@ -33,7 +39,9 @@ bun src/cli.ts ingest --source ccgp --url tests/fixtures/tenders/ccgp-legal-coun
 bun --hot src/server.ts
 ```
 
-默认地址：`http://127.0.0.1:8787`。
+默认地址：`http://127.0.0.1:8787`。未登录不得访问情报台与情报 API。本地首次启动需设置 `LEXSOURCE_ADMIN_PASSWORD`（可选 `LEXSOURCE_LAWYER_PASSWORD`），或 `bun src/cli.ts create-user`。
+
+前端是服务端 HTML，不是 React SPA。采集 Agent 实现 ReAct（思考 → 工具 → 观察），步骤写入 `ingest_run_steps`，值班台必须能回放。没有配置 Azure OpenAI 时运行记录须显示 `azure_openai_unconfigured`，不得伪装成空闲。
 
 ## 验收矩阵（硬性规定）
 

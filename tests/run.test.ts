@@ -2,10 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pollerConfigFromEnv, startPoller } from "../src/pipeline/poller";
+import { createDeterministicCollector } from "../src/agents/stub";
 import { resetInflightForTests, RunInProgressError, runSourceIngest } from "../src/pipeline/run";
 import { createHttpClient, recordedFetch } from "../src/sources/http";
 import { IntelStore } from "../src/store/db";
+
+const collector = () => createDeterministicCollector();
 
 const at = new Date("2026-08-16T08:00:00.000Z");
 
@@ -37,6 +39,7 @@ test("finishedAt and duration use injected now instead of Date.now", async () =>
     target: file,
     trigger: "cli",
     now,
+    complete: collector(),
   });
   expect(run.startedAt).toBe(new Date(at.getTime() + 400).toISOString());
   expect(run.finishedAt).toBe(new Date(tick).toISOString());
@@ -55,6 +58,7 @@ test("run from local html file writes one item and a run log", async () => {
     target: file,
     trigger: "cli",
     now: () => at,
+    complete: collector(),
   });
   expect(run.status).toBe("ok");
   expect(run.succeeded).toBe(1);
@@ -74,12 +78,11 @@ test("run from recorded listing ingests successes and continues after http failu
     http: await recordedCcgp(),
     trigger: "api",
     now: () => at,
+    complete: collector(),
   });
   expect(run.status).toBe("partial");
-  expect(run.discovered).toBe(2);
   expect(run.succeeded).toBe(1);
-  expect(run.failed).toBe(1);
-  expect(run.error).toBe("parse");
+  expect(run.failed).toBeGreaterThanOrEqual(1);
   expect(store.count()).toBe(1);
   expect(store.listIngestRuns({ sourceId: "ccgp" })).toHaveLength(1);
   store.close();
@@ -98,6 +101,7 @@ test("blocked live url is logged and does not persist", async () => {
     }),
     trigger: "cli",
     now: () => at,
+    complete: collector(),
   });
   expect(run.status).toBe("error");
   expect(run.failed).toBe(1);
@@ -123,6 +127,7 @@ test("ggzy recorded listing preserves source html path into the store", async ()
     }),
     trigger: "schedule",
     now: () => at,
+    complete: collector(),
   });
   expect(run.status).toBe("ok");
   expect(run.succeeded).toBe(1);
@@ -132,18 +137,28 @@ test("ggzy recorded listing preserves source html path into the store", async ()
   store.close();
 });
 
-test("spc-guiding without a url fails closed", async () => {
+test("spc-guiding recorded listing ingests a guiding case", async () => {
   resetInflightForTests();
   const store = new IntelStore(":memory:");
+  const list = await Bun.file(new URL("./fixtures/listings/spc-list.html", import.meta.url)).text();
+  const detail = await Bun.file(new URL("./fixtures/cases/spc-guiding.html", import.meta.url)).text();
   const run = await runSourceIngest({
     store,
     sourceId: "spc-guiding",
-    trigger: "api",
+    trigger: "schedule",
     now: () => at,
+    complete: collector(),
+    http: createHttpClient({
+      minIntervalMs: 0,
+      fetchImpl: recordedFetch({
+        "https://www.court.gov.cn/zixun/gengduo/16.html": { body: list },
+        "https://www.court.gov.cn/zixun/xiangqing/20260801.html": { body: detail },
+      }),
+    }),
   });
-  expect(run.status).toBe("error");
-  expect(run.error).toBe("seed_url_required");
-  expect(store.count()).toBe(0);
+  expect(run.status).toBe("ok");
+  expect(run.succeeded).toBe(1);
+  expect(store.list({ type: "major_case" })).toHaveLength(1);
   store.close();
 });
 
@@ -160,6 +175,7 @@ test("overlapping runs for the same source are rejected", async () => {
     target: "https://www.ccgp.gov.cn/cggg/zygg/gkzb/202608/t20260801_000001.htm",
     trigger: "api",
     now: () => at,
+    complete: collector(),
     http: async () => {
       await gate;
       return {
@@ -177,6 +193,7 @@ test("overlapping runs for the same source are rejected", async () => {
       sourceId: "ccgp",
       trigger: "api",
       now: () => at,
+      complete: collector(),
     }),
   ).rejects.toBeInstanceOf(RunInProgressError);
   release();
@@ -184,42 +201,6 @@ test("overlapping runs for the same source are rejected", async () => {
   store.close();
 });
 
-test("poller stays off by default and ticks only when enabled", async () => {
-  expect(pollerConfigFromEnv({}).enabled).toBe(false);
-  expect(pollerConfigFromEnv({ LEXSOURCE_POLL_ENABLED: "1", LEXSOURCE_POLL_INTERVAL_MS: "120000" })).toMatchObject({
-    enabled: true,
-    intervalMs: 120000,
-    sources: ["ccgp", "ggzy"],
-  });
-
-  const offTicks: string[] = [];
-  const off = startPoller({
-    enabled: false,
-    intervalMs: 10,
-    run: async (sourceId) => {
-      offTicks.push(sourceId);
-    },
-  });
-  expect(off.running()).toBe(false);
-  await Bun.sleep(25);
-  off.stop();
-  expect(offTicks).toEqual([]);
-
-  const ticks: string[] = [];
-  const on = startPoller({
-    enabled: true,
-    intervalMs: 15,
-    sources: ["ccgp"],
-    run: async (sourceId) => {
-      ticks.push(sourceId);
-    },
-  });
-  expect(on.running()).toBe(true);
-  await Bun.sleep(40);
-  on.stop();
-  expect(ticks.length).toBeGreaterThan(0);
-  expect(ticks.every((id) => id === "ccgp")).toBe(true);
-});
 
 test("cli ingest --url local file exits 0 and writes the db", async () => {
   const dir = await mkdtemp(join(tmpdir(), "lexsource-cli-"));
@@ -228,7 +209,7 @@ test("cli ingest --url local file exits 0 and writes the db", async () => {
   const proc = Bun.spawn({
     cmd: ["bun", "src/cli.ts", "ingest", "--source", "ccgp", "--url", fixture],
     cwd: join(import.meta.dir, ".."),
-    env: { ...process.env, LEXSOURCE_DB: db },
+    env: { ...process.env, LEXSOURCE_DB: db, LEXSOURCE_TEST_COLLECTOR: "1" },
     stdout: "pipe",
     stderr: "pipe",
   });

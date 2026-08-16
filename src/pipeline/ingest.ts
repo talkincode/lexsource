@@ -1,6 +1,6 @@
 import { IntelItemSchema, type IntelItem } from "../domain/intel";
-import { getSource } from "../sources/registry";
-import type { RawDocument } from "../sources/types";
+import { getChannel } from "../agents/channels";
+import { htmlToDocument } from "../sources/page";
 import type { IntelStore } from "../store/db";
 import { extractIntel } from "./extract";
 import { verifyIntel } from "./verify";
@@ -12,27 +12,37 @@ export type IngestInput = {
   text?: string;
 };
 
+export type IngestStage = "parse" | "extract" | "relevance" | "verify" | "store";
+
 export type IngestResult =
   | { ok: true; item: IntelItem }
-  | { ok: false; error: string; stage: "parse" | "extract" | "verify" | "store" };
+  | { ok: false; error: string; stage: IngestStage };
 
 export type AfterIngest = (item: IntelItem) => void;
 
-export function ingestDocument(
+export type IngestOptions = {
+  decision?: { accept: boolean; reason: string };
+};
+
+export async function ingestDocument(
   store: IntelStore,
   input: IngestInput,
   at = new Date(),
   afterIngest?: AfterIngest,
-): IngestResult {
-  let doc: RawDocument;
+  options: IngestOptions = {},
+): Promise<IngestResult> {
   try {
-    const source = getSource(input.sourceId);
-    doc = source.parse({
+    const channel = getChannel(input.sourceId);
+    if (!channel) {
+      return { ok: false, stage: "extract", error: `Unknown source: ${input.sourceId}` };
+    }
+    const doc = htmlToDocument({
+      sourceId: channel.id,
+      sourceUrl: input.sourceUrl,
       html: input.html,
       text: input.text,
-      sourceUrl: input.sourceUrl,
     });
-    const extracted = extractIntel(doc, source.kind);
+    const extracted = extractIntel(doc, channel.kind);
     const verified = verifyIntel(extracted, at);
     if (verified.verification.status === "failed") {
       return {
@@ -44,8 +54,25 @@ export function ingestDocument(
           .join("; "),
       };
     }
-    IntelItemSchema.parse(verified);
-    const saved = store.upsert(verified);
+    if (!options.decision?.accept) {
+      return {
+        ok: false,
+        stage: "relevance",
+        error: options.decision?.reason ?? "agent_did_not_accept",
+      };
+    }
+    const reviewed: IntelItem = {
+      ...verified,
+      verification: {
+        ...verified.verification,
+        checks: [
+          { name: "agent_review", ok: true, detail: options.decision.reason },
+          ...verified.verification.checks,
+        ],
+      },
+    };
+    IntelItemSchema.parse(reviewed);
+    const saved = store.upsert(reviewed);
     afterIngest?.(saved);
     return { ok: true, item: saved };
   } catch (error) {
