@@ -63,7 +63,11 @@ LexSource 是给律所使用的案源情报库：把全国法律服务招投标�
 
 - **可调度采集**
 
-  ccgp / ggzy 可从 URL 或本地 HTML 入库；HTTP 可注入、限速、友好 User-Agent，禁采裁判文书网。内置轮询默认关闭。每次采集写开始/成功/失败/耗时日志，不记原文或查询串。证据：`src/sources/http.ts`、`src/pipeline/run.ts`、`src/pipeline/poller.ts`、`tests/fetch.test.ts`、`tests/run.test.ts`、`tests/api.test.ts`。
+  ccgp / ggzy 可从 URL 或本地 HTML 入库；HTTP 可注入、限速、友好 User-Agent，禁采裁判文书网。内置轮询默认关闭。每次采集写开始/成功/失败/耗时日志，不记原文或查询串。情报台可手动触发 ccgp/ggzy 并查看最近 `ingest_runs`。证据：`src/sources/http.ts`、`src/pipeline/run.ts`、`src/pipeline/poller.ts`、`src/web/dashboard.ts`、`tests/fetch.test.ts`、`tests/run.test.ts`、`tests/api.test.ts`。
+
+- **订阅推送**
+
+  按地域 × 服务类型 × 预算上下限 × 类型（招标/重大案件）匹配入库情报。不可投标的招标不推送。交付通道可注入；默认写 `var/outbox.jsonl`，可用 `LEXSOURCE_WEBHOOK_URL` 预留下一跳。证据：`src/domain/subscription.ts`、`src/pipeline/notify.ts`、`src/notify/deliver.ts`、`tests/notify.test.ts`。
 
 ## 非目标（铁律）
 
@@ -128,5 +132,6 @@ LexSource 是给律所使用的案源情报库：把全国法律服务招投标�
 | 三格式导出 | 中 | ✅ | ✅ 缺失条目 404 | 不适用 | 不适用（导出不改库） | `tests/export.test.ts`、`tests/api.test.ts` |
 | Web 情报台 | 低 | ✅ 页面与 API 契约 | 不适用（只读壳） | 不适用 | 不适用 | `tests/api.test.ts` dashboard html is served |
 | 可调度采集 | 高 | ✅ 录制 listing+详情入库 | ✅ 禁采主机 / HTTP 500 / 无 seed / 本地路径拒 API | 不适用（同上） | ✅ 失败条目不落库，run 记失败数；同源并发拒绝 | `tests/fetch.test.ts`、`tests/run.test.ts`、`tests/api.test.ts` |
+| 订阅推送 | 高 | ✅ 建订阅后入库可投标标讯并投递 | ✅ 过期/不可投标不推；非法规则不落库 | 不适用（尚未做登录；引入权限后必须补两种角色） | ✅ 投递失败不记 delivery，可重试 | `tests/notify.test.ts` |
 
 缺口与最低期望：权限系统尚未存在，矩阵标“不适用”；一旦加入登录，必须补“有权/无权”两条 E2E。PDF 中文可读性仍是方向，不是当前已验收能力。

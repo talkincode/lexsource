@@ -1,6 +1,8 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { defaultSink } from "./notify/deliver";
 import { ingestDocument } from "./pipeline/ingest";
+import { notifySubscriptions } from "./pipeline/notify";
 import { runSourceIngest } from "./pipeline/run";
 import { createHttpClient } from "./sources/http";
 import { IntelStore } from "./store/db";
@@ -35,12 +37,14 @@ async function ingestTarget(flags: Record<string, string>) {
   }
 
   const store = new IntelStore(dbPath);
+  const sink = defaultSink();
   const run = await runSourceIngest({
     store,
     sourceId,
     target: url,
     http: createHttpClient(),
     trigger: "cli",
+    onIngested: (item) => notifySubscriptions({ store, item, sink }),
   });
   store.close();
   console.log(
@@ -59,6 +63,7 @@ async function ingestTarget(flags: Record<string, string>) {
 
 async function ingestFixtures() {
   const store = new IntelStore(dbPath);
+  const sink = defaultSink();
   const root = join(import.meta.dir, "..", "tests", "fixtures");
   const files = [
     ...(await listHtml(join(root, "tenders"))),
@@ -74,7 +79,7 @@ async function ingestFixtures() {
       sourceId: meta.sourceId,
       sourceUrl: meta.sourceUrl,
       html,
-    });
+    }, new Date(), (item) => notifySubscriptions({ store, item, sink }));
     if (result.ok) {
       ok += 1;
       console.log(JSON.stringify({ status: "ok", file, id: result.item.id, title: result.item.title }));

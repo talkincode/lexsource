@@ -1,7 +1,13 @@
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { IntelItemSchema, type IntelItem, type IntelType } from "../domain/intel";
+import { IntelItemSchema, type IntelItem, type IntelType, type ServiceType } from "../domain/intel";
+import {
+  SubscriptionSchema,
+  subscriptionName,
+  type Subscription,
+  type SubscriptionInput,
+} from "../domain/subscription";
 
 export type ListQuery = {
   type?: IntelType;
@@ -174,6 +180,98 @@ export class IntelStore {
     return row ? rowToRun(row) : null;
   }
 
+  createSubscription(input: SubscriptionInput, at = new Date()): Subscription {
+    const now = at.toISOString();
+    const sub = SubscriptionSchema.parse({
+      id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+      name: subscriptionName(input),
+      type: input.type,
+      region: emptyToNull(input.region),
+      serviceType: input.serviceType ?? null,
+      budgetMin: input.budgetMin ?? null,
+      budgetMax: input.budgetMax ?? null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.db
+      .query(
+        `INSERT INTO subscriptions (id, name, type, region, service_type, budget_min, budget_max, created_at, updated_at)
+         VALUES ($id, $name, $type, $region, $service_type, $budget_min, $budget_max, $created_at, $updated_at)`,
+      )
+      .run(subscriptionBinds(sub));
+    return sub;
+  }
+
+  updateSubscription(id: string, input: Partial<SubscriptionInput>, at = new Date()): Subscription | null {
+    const current = this.getSubscription(id);
+    if (!current) return null;
+    const merged: SubscriptionInput = {
+      name: input.name === undefined ? current.name : input.name,
+      type: input.type ?? current.type,
+      region: input.region === undefined ? current.region : input.region,
+      serviceType: input.serviceType === undefined ? current.serviceType : input.serviceType,
+      budgetMin: input.budgetMin === undefined ? current.budgetMin : input.budgetMin,
+      budgetMax: input.budgetMax === undefined ? current.budgetMax : input.budgetMax,
+    };
+    const sub = SubscriptionSchema.parse({
+      ...current,
+      name: subscriptionName({ ...merged, name: merged.name || current.name }),
+      type: merged.type,
+      region: emptyToNull(merged.region),
+      serviceType: merged.serviceType ?? null,
+      budgetMin: merged.budgetMin ?? null,
+      budgetMax: merged.budgetMax ?? null,
+      updatedAt: at.toISOString(),
+    });
+    this.db
+      .query(
+        `UPDATE subscriptions SET
+           name=$name, type=$type, region=$region, service_type=$service_type,
+           budget_min=$budget_min, budget_max=$budget_max, updated_at=$updated_at
+         WHERE id=$id`,
+      )
+      .run(subscriptionBinds(sub));
+    return sub;
+  }
+
+  deleteSubscription(id: string): boolean {
+    const result = this.db.query("DELETE FROM subscriptions WHERE id = ?").run(id);
+    return result.changes > 0;
+  }
+
+  getSubscription(id: string): Subscription | null {
+    const row = this.db
+      .query<SubscriptionRow, [string]>("SELECT * FROM subscriptions WHERE id = ?")
+      .get(id);
+    return row ? rowToSubscription(row) : null;
+  }
+
+  listSubscriptions(): Subscription[] {
+    return this.db
+      .query<SubscriptionRow, []>("SELECT * FROM subscriptions ORDER BY created_at DESC")
+      .all()
+      .map(rowToSubscription);
+  }
+
+  hasDelivery(subscriptionId: string, itemId: string): boolean {
+    const row = this.db
+      .query<{ n: number }, [string, string]>(
+        "SELECT COUNT(*) AS n FROM subscription_deliveries WHERE subscription_id = ? AND item_id = ?",
+      )
+      .get(subscriptionId, itemId);
+    return (row?.n ?? 0) > 0;
+  }
+
+  recordDelivery(subscriptionId: string, itemId: string, deliveredAt: string): boolean {
+    const result = this.db
+      .query(
+        `INSERT OR IGNORE INTO subscription_deliveries (subscription_id, item_id, delivered_at)
+         VALUES (?, ?, ?)`,
+      )
+      .run(subscriptionId, itemId, deliveredAt);
+    return result.changes > 0;
+  }
+
   listIngestRuns(query: { sourceId?: string; limit?: number } = {}): IngestRun[] {
     const limit = query.limit ?? 50;
     if (query.sourceId) {
@@ -223,6 +321,24 @@ export class IntelStore {
       );
       CREATE INDEX IF NOT EXISTS ingest_runs_started_idx ON ingest_runs(started_at);
       CREATE INDEX IF NOT EXISTS ingest_runs_source_idx ON ingest_runs(source_id);
+      CREATE TABLE IF NOT EXISTS subscriptions (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        region TEXT,
+        service_type TEXT,
+        budget_min REAL,
+        budget_max REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS subscription_deliveries (
+        subscription_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        delivered_at TEXT NOT NULL,
+        PRIMARY KEY (subscription_id, item_id),
+        FOREIGN KEY (subscription_id) REFERENCES subscriptions(id) ON DELETE CASCADE
+      );
     `);
   }
 }
@@ -255,6 +371,51 @@ function runBinds(run: IngestRun) {
     $failed: run.failed,
     $error: run.error,
   };
+}
+
+type SubscriptionRow = {
+  id: string;
+  name: string;
+  type: string;
+  region: string | null;
+  service_type: string | null;
+  budget_min: number | null;
+  budget_max: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+function emptyToNull(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function subscriptionBinds(sub: Subscription) {
+  return {
+    $id: sub.id,
+    $name: sub.name,
+    $type: sub.type,
+    $region: sub.region,
+    $service_type: sub.serviceType,
+    $budget_min: sub.budgetMin,
+    $budget_max: sub.budgetMax,
+    $created_at: sub.createdAt,
+    $updated_at: sub.updatedAt,
+  };
+}
+
+function rowToSubscription(row: SubscriptionRow): Subscription {
+  return SubscriptionSchema.parse({
+    id: row.id,
+    name: row.name,
+    type: row.type as IntelType,
+    region: row.region,
+    serviceType: row.service_type as ServiceType | null,
+    budgetMin: row.budget_min,
+    budgetMax: row.budget_max,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  });
 }
 
 function rowToRun(row: IngestRunRow): IngestRun {

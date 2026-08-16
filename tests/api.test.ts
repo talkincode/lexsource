@@ -71,6 +71,11 @@ test("dashboard html is served", async () => {
   expect(page.status).toBe(200);
   expect(html).toContain("律源 LexSource");
   expect(html).toContain("/api/intel");
+  expect(html).toContain("运行采集");
+  expect(html).toContain("/api/ingest-runs");
+  expect(html).toContain("/api/sources/");
+  expect(html).toContain("/api/subscriptions");
+  expect(html).toContain("创建订阅");
 });
 
 test("bad ingest payload is rejected", async () => {

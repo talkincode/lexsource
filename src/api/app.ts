@@ -1,8 +1,12 @@
 import { Hono } from "hono";
+import type { IntelItem } from "../domain/intel";
+import type { SubscriptionInput } from "../domain/subscription";
 import { toDocx } from "../export/docx";
 import { toMarkdown } from "../export/markdown";
 import { toPdf } from "../export/pdf";
+import type { DeliverySink } from "../notify/deliver";
 import { ingestDocument } from "../pipeline/ingest";
+import { notifySubscriptions, previewSubscription } from "../pipeline/notify";
 import { RunInProgressError, isLocalHtmlTarget, runSourceIngest } from "../pipeline/run";
 import { createHttpClient } from "../sources/http";
 import { getSource, listSources } from "../sources/registry";
@@ -14,12 +18,16 @@ export type AppEnv = {
   store: IntelStore;
   now?: () => Date;
   fetchHtml?: FetchHtml;
+  deliver?: DeliverySink;
 };
 
 export function createApp(env: AppEnv) {
   const app = new Hono();
   const now = env.now ?? (() => new Date());
   const fetchHtml = env.fetchHtml ?? createHttpClient();
+  const onIngested = env.deliver
+    ? (item: IntelItem) => notifySubscriptions({ store: env.store, item, sink: env.deliver!, now })
+    : undefined;
 
   app.get("/", (c) => c.html(dashboardHtml()));
 
@@ -60,6 +68,7 @@ export function createApp(env: AppEnv) {
         http: fetchHtml,
         trigger: "api",
         now,
+        onIngested,
       });
       return c.json({ ok: run.status !== "error", run });
     } catch (error) {
@@ -101,6 +110,7 @@ export function createApp(env: AppEnv) {
         text: typeof body.text === "string" ? body.text : undefined,
       },
       now(),
+      onIngested,
     );
     if (!result.ok) return c.json(result, 422);
     return c.json(result, 201);
@@ -140,7 +150,99 @@ export function createApp(env: AppEnv) {
     });
   });
 
+  app.get("/api/subscriptions", (c) => c.json({ subscriptions: env.store.listSubscriptions() }));
+
+  app.post("/api/subscriptions", async (c) => {
+    const parsed = parseSubscriptionInput(await c.req.json().catch(() => null));
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    if (!parsed.value.type) return c.json({ error: "type_required" }, 400);
+    const subscription = env.store.createSubscription(
+      { ...parsed.value, type: parsed.value.type },
+      now(),
+    );
+    return c.json({ subscription }, 201);
+  });
+
+  app.get("/api/subscriptions/:id", (c) => {
+    const subscription = env.store.getSubscription(c.req.param("id"));
+    if (!subscription) return c.json({ error: "not_found" }, 404);
+    return c.json({ subscription });
+  });
+
+  app.put("/api/subscriptions/:id", async (c) => {
+    const current = env.store.getSubscription(c.req.param("id"));
+    if (!current) return c.json({ error: "not_found" }, 404);
+    const parsed = parseSubscriptionInput(await c.req.json().catch(() => null), true);
+    if (!parsed.ok) return c.json({ error: parsed.error }, 400);
+    const subscription = env.store.updateSubscription(c.req.param("id"), parsed.value, now());
+    return c.json({ subscription });
+  });
+
+  app.delete("/api/subscriptions/:id", (c) => {
+    if (!env.store.deleteSubscription(c.req.param("id"))) return c.json({ error: "not_found" }, 404);
+    return c.json({ ok: true });
+  });
+
+  app.post("/api/subscriptions/:id/preview", (c) => {
+    const preview = previewSubscription(env.store, c.req.param("id"));
+    if (!preview) return c.json({ error: "not_found" }, 404);
+    return c.json(preview);
+  });
+
   return app;
+}
+
+function parseSubscriptionInput(
+  body: unknown,
+  partial = false,
+): { ok: true; value: Partial<SubscriptionInput> } | { ok: false; error: string } {
+  if (!body || typeof body !== "object") return { ok: false, error: "invalid_json" };
+  const raw = body as Record<string, unknown>;
+  const type = asEnum(typeof raw.type === "string" ? raw.type : undefined, ["tender", "major_case"]);
+  if (!type && !partial) return { ok: false, error: "type_required" };
+  if (raw.type != null && raw.type !== "" && !type) return { ok: false, error: "invalid_type" };
+
+  const serviceType =
+    raw.serviceType === undefined
+      ? undefined
+      : raw.serviceType === null || raw.serviceType === ""
+        ? null
+        : asEnum(typeof raw.serviceType === "string" ? raw.serviceType : undefined, [
+            "general_counsel",
+            "special_project",
+            "litigation",
+            "other",
+          ]);
+  if (raw.serviceType != null && raw.serviceType !== "" && serviceType === undefined) {
+    return { ok: false, error: "invalid_service_type" };
+  }
+
+  const budgetMin = parseBudget(raw.budgetMin);
+  const budgetMax = parseBudget(raw.budgetMax);
+  if (budgetMin === "invalid" || budgetMax === "invalid") return { ok: false, error: "invalid_budget" };
+  if (budgetMin != null && budgetMax != null && budgetMin > budgetMax) return { ok: false, error: "invalid_budget_range" };
+
+  const name = raw.name === undefined ? undefined : typeof raw.name === "string" ? raw.name : null;
+  const region = raw.region === undefined ? undefined : typeof raw.region === "string" ? raw.region : null;
+
+  return {
+    ok: true,
+    value: {
+      name,
+      type,
+      region,
+      serviceType,
+      budgetMin: raw.budgetMin === undefined ? undefined : budgetMin,
+      budgetMax: raw.budgetMax === undefined ? undefined : budgetMax,
+    },
+  };
+}
+
+function parseBudget(value: unknown): number | null | "invalid" {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  if (!Number.isFinite(n) || n < 0) return "invalid";
+  return n;
 }
 
 function asEnum<T extends string>(value: string | undefined, allowed: readonly T[]): T | undefined {

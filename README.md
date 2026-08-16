@@ -19,6 +19,7 @@
 - 导出 Markdown、Word、PDF
 - 打开本地情报台
 - 从 URL 或本地 HTML 采集入库（ccgp / ggzy / 指导性案例）；定时轮询默认关闭
+- 按地域 / 服务类型 / 预算订阅入库情报；不可投标的招标不推送；默认可写 `var/outbox.jsonl`
 
 项目画像、非目标和验收矩阵见 [docs/roadmap.md](docs/roadmap.md)。Agent 硬约束见 [AGENTS.md](AGENTS.md)。
 
@@ -44,7 +45,13 @@ bun src/cli.ts ingest --source ccgp --url tests/fixtures/tenders/ccgp-legal-coun
 curl -s http://127.0.0.1:8787/api/health
 curl -s 'http://127.0.0.1:8787/api/intel?type=tender&biddable=1'
 curl -s -X POST http://127.0.0.1:8787/api/sources/ccgp/run
+curl -s http://127.0.0.1:8787/api/ingest-runs
+curl -s -X POST http://127.0.0.1:8787/api/subscriptions \
+  -H 'content-type: application/json' \
+  -d '{"name":"北京常年顾问","type":"tender","region":"北京","serviceType":"general_counsel"}'
 ```
+
+订阅默认写入 `var/outbox.jsonl`。若设置 `LEXSOURCE_WEBHOOK_URL`，同一事件会再 POST 到该地址（预留通道）。
 
 定时轮询默认关闭。打开时设置 `LEXSOURCE_POLL_ENABLED=1`，间隔默认 1 小时（`LEXSOURCE_POLL_INTERVAL_MS`，源列表 `LEXSOURCE_POLL_SOURCES=ccgp,ggzy`）。测试用注入 HTTP / 录制响应，不打外网。
 

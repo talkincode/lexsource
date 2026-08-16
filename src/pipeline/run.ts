@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import type { IntelItem } from "../domain/intel";
 import { ingestDocument, type IngestResult } from "./ingest";
 import { getSource } from "../sources/registry";
 import { createHttpClient, isBlockedHost } from "../sources/http";
@@ -17,6 +18,7 @@ export type RunSourceInput = {
   trigger: IngestTrigger;
   now?: () => Date;
   maxItems?: number;
+  onIngested?: (item: IntelItem) => void;
 };
 
 export class RunInProgressError extends Error {
@@ -46,14 +48,14 @@ export async function runSourceIngest(input: RunSourceInput): Promise<IngestRun>
         status: "error",
         failed: 1,
         error: "seed_url_required",
-      });
+      }, now);
     }
 
     if (isLocalHtmlTarget(target)) {
       const html = await Bun.file(localPath(target)).text();
       const sourceUrl = sourceUrlFromHtml(html) ?? pathToFileURL(resolve(localPath(target))).href;
-      const result = ingestDocument(store, { sourceId, sourceUrl, html }, now());
-      return finish(store, run, started, countsFromResults([result]));
+      const result = ingestDocument(store, { sourceId, sourceUrl, html }, now(), input.onIngested);
+      return finish(store, run, started, countsFromResults([result]), now);
     }
 
     const http = input.http ?? createHttpClient();
@@ -63,7 +65,7 @@ export async function runSourceIngest(input: RunSourceInput): Promise<IngestRun>
         status: "error",
         failed: 1,
         error: fetched.code,
-      });
+      }, now);
     }
 
     const discovered = (source.discover?.(fetched.html, fetched.sourceUrl) ?? [])
@@ -77,6 +79,7 @@ export async function runSourceIngest(input: RunSourceInput): Promise<IngestRun>
           store,
           { sourceId, sourceUrl: fetched.sourceUrl, html: fetched.html },
           now(),
+          input.onIngested,
         ),
       );
     } else {
@@ -91,16 +94,17 @@ export async function runSourceIngest(input: RunSourceInput): Promise<IngestRun>
             store,
             { sourceId, sourceUrl: page.sourceUrl, html: page.html },
             now(),
+            input.onIngested,
           ),
         );
       }
     }
 
-    return finish(store, run, started, countsFromResults(results));
+    return finish(store, run, started, countsFromResults(results), now);
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown_error";
     const code = message.startsWith("Unknown source") ? "unknown_source" : "run_failed";
-    return finish(store, run, started, { status: "error", failed: 1, error: code });
+    return finish(store, run, started, { status: "error", failed: 1, error: code }, now);
   } finally {
     inflight.delete(sourceId);
   }
@@ -155,11 +159,13 @@ function finish(
   run: IngestRun,
   started: Date,
   patch: Partial<Pick<IngestRun, "status" | "discovered" | "succeeded" | "failed" | "error">>,
+  now: () => Date,
 ): IngestRun {
-  const finishedAt = new Date(Math.max(Date.now(), started.getTime())).toISOString();
+  const finishedMs = Math.max(now().getTime(), started.getTime());
+  const finishedAt = new Date(finishedMs).toISOString();
   return store.finishIngestRun(run.id, {
     finishedAt,
-    durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(run.startedAt)),
+    durationMs: Math.max(0, finishedMs - started.getTime()),
     status: patch.status ?? "error",
     discovered: patch.discovered ?? 0,
     succeeded: patch.succeeded ?? 0,
