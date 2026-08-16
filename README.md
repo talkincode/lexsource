@@ -40,6 +40,11 @@ bun --hot src/server.ts
 
 浏览器打开 `http://127.0.0.1:8787`。数据库默认写在 `var/lexsource.db`。
 
+## CI / 发版
+
+- push 到 `main` 或开 PR 会跑 `bun test`，以及一次不打外网的 `ingest-fixtures` smoke。
+- 打 `vX.Y.Z` tag 会先跑同样测试，再创建 GitHub Release，并附带不含 `node_modules` 的可部署归档。
+
 ```bash
 bun src/cli.ts ingest --source ccgp --url tests/fixtures/tenders/ccgp-legal-counsel.html
 curl -s http://127.0.0.1:8787/api/health
