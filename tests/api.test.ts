@@ -96,6 +96,8 @@ test("logged-in dashboard is a collected-intel desk, not a subscription console"
   expect(html).toContain("案件情报");
   expect(html).toContain("/settings");
   expect(html).toContain("采集值班台");
+  expect(html).toContain("采集状态加载中");
+  expect(html).toContain("展开");
   expect(html).toContain("采集渠道");
   expect(html).toContain("查找");
   expect(html).toContain("全部地区");

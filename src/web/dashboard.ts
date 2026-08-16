@@ -11,13 +11,23 @@ export function dashboardHtml(user: User): string {
   <title>律源 LexSource</title>
   ${FONT_LINKS}
   <style>${SHELL_CSS}
+    .ops-wrap { background: var(--void); border-bottom: 1px solid var(--line-dark); }
+    .ops-bar {
+      width: 100%; margin: 0; padding: 10px 22px; border: 0; border-radius: 0;
+      background: transparent; color: #c9b892; display: flex; align-items: center;
+      justify-content: space-between; gap: 18px; text-align: left; cursor: pointer;
+    }
+    .ops-bar:hover { background: #16130e; color: #efe6d2; }
+    .ops-summary { font-size: 13px; line-height: 1.45; min-width: 0; }
+    .ops-more { flex-shrink: 0; color: var(--brass); font-size: 12px; letter-spacing: .08em; }
     .ops {
-      display: grid;
+      display: none;
       grid-template-columns: 1fr 1fr 1.1fr;
       gap: 1px;
       background: var(--line-dark);
-      border-bottom: 1px solid var(--line-dark);
+      border-top: 1px solid var(--line-dark);
     }
+    .ops-wrap.open .ops { display: grid; }
     .card {
       background: var(--chrome);
       color: #efe6d2;
@@ -41,7 +51,7 @@ export function dashboardHtml(user: User): string {
     .workspace {
       display: grid;
       grid-template-columns: 300px 1fr 1.15fr;
-      min-height: calc(100vh - 210px);
+      min-height: calc(100vh - 148px);
     }
     .channels, .list, .preview { padding: 20px 22px 36px; overflow-y: auto; min-width: 0; }
     .channels { background: #efe6cf; border-right: 1px solid var(--line); }
@@ -94,16 +104,23 @@ export function dashboardHtml(user: User): string {
     .checks .bad { color: var(--alert); }
     @media (max-width: 1100px) {
       .ops, .workspace { grid-template-columns: 1fr; }
+      .ops-wrap.open .ops { display: grid; }
       .channels, .preview { border: 0; }
     }
   </style>
 </head>
 <body>
   ${headerHtml(user, "desk")}
-  <section class="ops" id="ops" aria-label="采集值班台">
-    <article class="card" id="card-tender"></article>
-    <article class="card" id="card-case"></article>
-    <article class="card" id="card-pipeline"></article>
+  <section class="ops-wrap" id="ops" aria-label="采集值班台">
+    <button type="button" class="ops-bar" id="ops-toggle" aria-expanded="false">
+      <span id="ops-summary">采集状态加载中…</span>
+      <span class="ops-more" id="ops-more">展开</span>
+    </button>
+    <div class="ops" id="ops-panel">
+      <article class="card" id="card-tender"></article>
+      <article class="card" id="card-case"></article>
+      <article class="card" id="card-pipeline"></article>
+    </div>
   </section>
   <main class="workspace">
     <aside class="channels">
@@ -150,6 +167,7 @@ export function dashboardHtml(user: User): string {
     const pageSize = 10;
     let listState = { items: [], total: 0, page: 1, pageSize, regions: [] };
     const pendingRuns = new Set();
+    let opsOpen = false;
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>\"']/g, (ch) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -426,6 +444,27 @@ export function dashboardHtml(user: User): string {
       listState = data;
       paintList();
     }
+    function shortStatus(agent) {
+      if (!agent) return "";
+      if (agent.blocked) return "未接通";
+      if (agent.running || pendingRuns.has(agent.id)) return "正在采集";
+      if (agent.schedule && agent.schedule.enabled === false) return "已暂停";
+      const last = agent.lastRun;
+      if (!last) return "待命，尚未采集";
+      if (last.status === "ok") return "待命，上次入库 " + last.succeeded + " 条";
+      if (last.status === "partial") return "待命，上次入库 " + last.succeeded + " 条";
+      return "上次未采完";
+    }
+    function paintOpsSummary() {
+      const agents = desk.agents || [];
+      const tender = agents.find((a) => a.id === "tender");
+      const cases = agents.find((a) => a.id === "case");
+      const bits = [];
+      if (tender) bits.push("招标 " + shortStatus(tender));
+      if (cases) bits.push("案件 " + shortStatus(cases));
+      if (desk.ops && desk.ops.llm && !desk.ops.llm.configured) bits.push("采集服务未接通");
+      $("ops-summary").textContent = bits.join("  ·  ") || "采集状态";
+    }
     function paintOps() {
       const agents = desk.agents || [];
       const tender = agents.find((a) => a.id === "tender") || agents[0];
@@ -433,6 +472,7 @@ export function dashboardHtml(user: User): string {
       if (tender) $("card-tender").innerHTML = renderAgentCard(tender);
       if (cases) $("card-case").innerHTML = renderAgentCard(cases);
       $("card-pipeline").innerHTML = renderPipeline(desk.ops);
+      paintOpsSummary();
       for (const btn of document.querySelectorAll("[data-run]")) {
         btn.onclick = async () => {
           if (btn.disabled) return;
@@ -484,6 +524,12 @@ export function dashboardHtml(user: User): string {
       event.preventDefault();
       page = 1;
       loadList();
+    };
+    $("ops-toggle").onclick = () => {
+      opsOpen = !opsOpen;
+      $("ops").classList.toggle("open", opsOpen);
+      $("ops-toggle").setAttribute("aria-expanded", opsOpen ? "true" : "false");
+      $("ops-more").textContent = opsOpen ? "收起" : "展开";
     };
     $("logout").onclick = async () => {
       await api("/api/auth/logout", { method: "POST" });
