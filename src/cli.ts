@@ -1,17 +1,63 @@
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { ingestDocument } from "./pipeline/ingest";
+import { runSourceIngest } from "./pipeline/run";
+import { createHttpClient } from "./sources/http";
 import { IntelStore } from "./store/db";
 
 const dbPath = process.env.LEXSOURCE_DB ?? "var/lexsource.db";
 
 async function main() {
-  const [command] = Bun.argv.slice(2);
-  if (command !== "ingest-fixtures") {
-    console.error("Usage: bun src/cli.ts ingest-fixtures");
+  const { command, flags } = parseArgs(Bun.argv.slice(2));
+  if (command === "ingest-fixtures") {
+    await ingestFixtures();
+    return;
+  }
+  if (command === "ingest") {
+    await ingestTarget(flags);
+    return;
+  }
+  console.error("Usage: bun src/cli.ts ingest-fixtures");
+  console.error(
+    "       bun src/cli.ts ingest --source <ccgp|ggzy|spc-guiding> --url <https://...|./file.html>",
+  );
+  process.exit(1);
+}
+
+async function ingestTarget(flags: Record<string, string>) {
+  const sourceId = flags.source;
+  const url = flags.url;
+  if (!sourceId || !url) {
+    console.error(
+      "Usage: bun src/cli.ts ingest --source <ccgp|ggzy|spc-guiding> --url <https://...|./file.html>",
+    );
     process.exit(1);
   }
 
+  const store = new IntelStore(dbPath);
+  const run = await runSourceIngest({
+    store,
+    sourceId,
+    target: url,
+    http: createHttpClient(),
+    trigger: "cli",
+  });
+  store.close();
+  console.log(
+    JSON.stringify({
+      status: run.status,
+      sourceId: run.sourceId,
+      discovered: run.discovered,
+      succeeded: run.succeeded,
+      failed: run.failed,
+      durationMs: run.durationMs,
+      error: run.error,
+    }),
+  );
+  if (run.status === "error" || run.failed > 0) process.exit(1);
+}
+
+async function ingestFixtures() {
   const store = new IntelStore(dbPath);
   const root = join(import.meta.dir, "..", "tests", "fixtures");
   const files = [
@@ -40,6 +86,29 @@ async function main() {
   store.close();
   console.log(JSON.stringify({ ingested: ok, failed }));
   if (failed > 0) process.exit(1);
+}
+
+function parseArgs(argv: string[]): { command: string | undefined; flags: Record<string, string> } {
+  const [command, ...rest] = argv;
+  const flags: Record<string, string> = {};
+  for (let i = 0; i < rest.length; i += 1) {
+    const token = rest[i];
+    if (!token?.startsWith("--")) continue;
+    const eq = token.indexOf("=");
+    if (eq > 2) {
+      flags[token.slice(2, eq)] = token.slice(eq + 1);
+      continue;
+    }
+    const key = token.slice(2);
+    const next = rest[i + 1];
+    if (next && !next.startsWith("--")) {
+      flags[key] = next;
+      i += 1;
+    } else {
+      flags[key] = "1";
+    }
+  }
+  return { command, flags };
 }
 
 function parseMeta(html: string): { sourceId: string; sourceUrl: string } {

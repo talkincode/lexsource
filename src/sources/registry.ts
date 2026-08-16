@@ -12,13 +12,17 @@ export function getSource(id: string): SourceAdapter {
 }
 
 export function listSources(): Array<
-  Pick<SourceAdapter, "id" | "name" | "kind" | "region" | "description">
+  Pick<SourceAdapter, "id" | "name" | "kind" | "region" | "description" | "seedUrl"> & {
+    fetchable: boolean;
+  }
 > {
-  return sourceRegistry.map(({ id, name, kind, region, description }) => ({
-    id,
-    name,
-    kind,
-    region,
-    description,
+  return sourceRegistry.map((source) => ({
+    id: source.id,
+    name: source.name,
+    kind: source.kind,
+    region: source.region,
+    description: source.description,
+    seedUrl: source.seedUrl,
+    fetchable: Boolean(source.seedUrl || source.discover),
   }));
 }

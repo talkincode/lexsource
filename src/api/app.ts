@@ -3,18 +3,23 @@ import { toDocx } from "../export/docx";
 import { toMarkdown } from "../export/markdown";
 import { toPdf } from "../export/pdf";
 import { ingestDocument } from "../pipeline/ingest";
-import { listSources } from "../sources/registry";
+import { RunInProgressError, isLocalHtmlTarget, runSourceIngest } from "../pipeline/run";
+import { createHttpClient } from "../sources/http";
+import { getSource, listSources } from "../sources/registry";
+import type { FetchHtml } from "../sources/types";
 import type { IntelStore, ListQuery } from "../store/db";
 import { dashboardHtml } from "../web/dashboard";
 
 export type AppEnv = {
   store: IntelStore;
   now?: () => Date;
+  fetchHtml?: FetchHtml;
 };
 
 export function createApp(env: AppEnv) {
   const app = new Hono();
   const now = env.now ?? (() => new Date());
+  const fetchHtml = env.fetchHtml ?? createHttpClient();
 
   app.get("/", (c) => c.html(dashboardHtml()));
 
@@ -27,6 +32,43 @@ export function createApp(env: AppEnv) {
   );
 
   app.get("/api/sources", (c) => c.json({ sources: listSources() }));
+
+  app.get("/api/ingest-runs", (c) => {
+    const sourceId = c.req.query("sourceId") || undefined;
+    return c.json({ runs: env.store.listIngestRuns({ sourceId, limit: 50 }) });
+  });
+
+  app.post("/api/sources/:id/run", async (c) => {
+    const sourceId = c.req.param("id");
+    try {
+      getSource(sourceId);
+    } catch {
+      return c.json({ error: "unknown_source" }, 404);
+    }
+
+    const body = await c.req.json().catch(() => ({}));
+    const url = typeof body?.url === "string" ? body.url.trim() : undefined;
+    if (url && isLocalHtmlTarget(url)) {
+      return c.json({ error: "url_must_be_http" }, 400);
+    }
+
+    try {
+      const run = await runSourceIngest({
+        store: env.store,
+        sourceId,
+        target: url,
+        http: fetchHtml,
+        trigger: "api",
+        now,
+      });
+      return c.json({ ok: run.status !== "error", run });
+    } catch (error) {
+      if (error instanceof RunInProgressError) {
+        return c.json({ error: "run_in_progress", sourceId }, 409);
+      }
+      throw error;
+    }
+  });
 
   app.get("/api/intel", (c) => {
     const query: ListQuery = {
