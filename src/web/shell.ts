@@ -86,6 +86,9 @@ input, select, button {
 }
 button { margin-top: 12px; background: var(--ink); color: var(--paper); cursor: pointer; }
 button:hover { background: #2a241b; }
+button:disabled, button:disabled:hover {
+  opacity: .42; cursor: not-allowed; background: var(--ink); color: var(--paper);
+}
 button.danger { background: var(--alert); color: #fff; border-color: var(--alert); }
 .tag {
   display: inline-block; border: 1px solid var(--line); padding: 1px 7px;
@@ -110,7 +113,7 @@ button.danger { background: var(--alert); color: #fff; border-color: var(--alert
 }
 `;
 
-export function headerHtml(user: User, page: "desk" | "settings"): string {
+export function headerHtml(user: User, page: "desk" | "settings" | "run"): string {
   const role = user.role === "admin" ? "管理员" : "律师";
   const other =
     page === "desk"
@@ -123,7 +126,7 @@ export function headerHtml(user: User, page: "desk" | "settings"): string {
     </div>
     <div class="meta">
       <div id="who">${escapeHtml(user.username)} · ${role}</div>
-      <div id="health">${page === "desk" ? "值班台加载中…" : "所内设置"}</div>
+      <div id="health">${page === "run" ? "采集过程" : page === "desk" ? "值班台加载中…" : "所内设置"}</div>
       <div class="nav">
         ${other}
         <button class="ghost" id="logout" type="button">退出</button>

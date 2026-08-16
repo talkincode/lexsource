@@ -13,7 +13,7 @@ test("unauthenticated visitors get a login page and cannot read intel", async ()
   expect(html).toContain("进入情报台");
   expect(html).toContain("/api/auth/login");
   expect(html).not.toContain("创建订阅");
-  expect(html).not.toContain("现在还能投");
+  expect(html).not.toContain("招投标");
 
   const intel = await app.request("/api/intel");
   expect(intel.status).toBe(401);

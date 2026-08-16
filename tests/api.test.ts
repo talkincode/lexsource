@@ -73,12 +73,14 @@ test("logged-in dashboard is a collected-intel desk, not a subscription console"
   const html = await page.text();
   expect(page.status).toBe(200);
   expect(html).toContain("律源 LexSource");
-  expect(html).toContain("现在还能投");
-  expect(html).toContain("所里能用的案件");
+  expect(html).toContain("招投标");
+  expect(html).toContain("案件情报");
   expect(html).toContain("/settings");
   expect(html).toContain("采集值班台");
-  expect(html).toContain("ReAct");
-  expect(html).toContain("采集评审");
+  expect(html).toContain("采集渠道");
+  expect(html).not.toContain("现在还能投");
+  expect(html).not.toContain("所里能用的案件");
+  expect(html).not.toContain("本轮步骤");
   expect(html).not.toContain("间隔（分钟）");
   expect(html).not.toContain("/api/subscriptions");
   expect(html).not.toContain("创建订阅");

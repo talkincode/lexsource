@@ -25,6 +25,7 @@ import type { FetchHtml } from "../sources/types";
 import type { IntelStore, ListQuery } from "../store/db";
 import { dashboardHtml } from "../web/dashboard";
 import { loginHtml } from "../web/login";
+import { runHtml, runMissingHtml } from "../web/run";
 import { settingsHtml } from "../web/settings";
 
 export type AppEnv = {
@@ -52,6 +53,14 @@ export function createApp(env: AppEnv) {
     const user = userFromCookie(c, env.store, now());
     if (!user) return c.html(loginHtml());
     return c.html(settingsHtml(user));
+  });
+
+  app.get("/runs/:id", (c) => {
+    const user = userFromCookie(c, env.store, now());
+    if (!user) return c.html(loginHtml());
+    const run = env.store.getIngestRun(c.req.param("id"));
+    if (!run) return c.html(runMissingHtml(user), 404);
+    return c.html(runHtml(user, run.id));
   });
 
   app.get("/api/health", (c) => {

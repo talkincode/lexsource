@@ -111,3 +111,25 @@ test("missing run detail is 404", async () => {
   expect(res.status).toBe(404);
   store.close();
 });
+
+test("run page is readable after login and hidden before login", async () => {
+  const admin = await authedApp("admin");
+  const created = admin.store.startIngestRun({
+    sourceId: "ccgp",
+    trigger: "api",
+    startedAt: at.toISOString(),
+  });
+  const guest = await admin.app.request(`/runs/${created.id}`);
+  expect(guest.status).toBe(200);
+  expect(await guest.text()).toContain("进入情报台");
+
+  const page = await admin.app.request(`/runs/${created.id}`, { headers: admin.headers });
+  expect(page.status).toBe(200);
+  const html = await page.text();
+  expect(html).toContain("采集过程");
+  expect(html).toContain("中国政府采购网");
+
+  const missing = await admin.app.request("/runs/does-not-exist", { headers: admin.headers });
+  expect(missing.status).toBe(404);
+  admin.store.close();
+});
