@@ -55,6 +55,7 @@ const SharedFields = {
   rawText: z.string().min(1),
   confidence: z.number().min(0).max(1),
   verification: VerificationSchema,
+  suggestions: z.array(z.string()).default([]),
 };
 
 export const TenderSchema = z.object({

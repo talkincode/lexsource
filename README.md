@@ -69,6 +69,12 @@ bun src/cli.ts create-user --username admin --password changeme8 --role admin
 bun src/cli.ts create-user --username lawyer --password changeme8 --role lawyer
 ```
 
+抓取使用浏览器伪装头；渠道可在设置里绑定 Cookie（只写不回显）。文书网可作为案件参考源，建议不少于 3 天一轮。需要浏览器时：
+
+```bash
+LEXSOURCE_MCP_PLAYWRIGHT=1 bun --hot src/server.ts
+```
+
 采集要能真正跑起来，还需要 Azure OpenAI（任选一组）：
 
 - `LEXSOURCE_AZURE_OPENAI_API_URL` / `LEXSOURCE_AZURE_OPENAI_API_KEY`

@@ -1,7 +1,6 @@
-import { getChannel, listChannels } from "./channels";
+import { getChannel } from "./channels";
 import type { ToolDef } from "./llm";
 import { excerpt, extractLinks, htmlToDocument } from "../sources/page";
-import { isBlockedHost } from "../sources/http";
 import type { FetchHtml } from "../sources/types";
 import { ingestDocument } from "../pipeline/ingest";
 import type { IntelStore } from "../store/db";
@@ -43,7 +42,7 @@ export const COLLECTION_TOOLS: ToolDef[] = [
     type: "function",
     function: {
       name: "fetch_url",
-      description: "抓取一个 http(s) 页面。裁判文书网会被工具层拒绝。返回标题、正文摘录和链接数。",
+      description: "抓取一个 http(s) 页面，带浏览器伪装头；渠道若绑定了 Cookie 会自动带上。返回标题、正文摘录和链接数。",
       parameters: {
         type: "object",
         properties: {
@@ -122,12 +121,13 @@ export async function executeTool(
   switch (name) {
     case "list_channels":
       return {
-        channels: listChannels().map((channel) => ({
+        channels: session.store.listCollectionChannels().map((channel) => ({
           id: channel.id,
           name: channel.name,
           kind: channel.kind,
           seedUrls: channel.seedUrls,
           hints: channel.hints,
+          hasCookie: channel.hasCookie,
         })),
       };
     case "fetch_url":
@@ -152,11 +152,9 @@ export async function executeTool(
 
 async function fetchUrl(session: AgentSession, url: string, channelId?: string): Promise<unknown> {
   if (!url) return { ok: false, error: "url_required" };
-  if (isBlockedHost(url)) {
-    session.failed.push({ url, error: "blocked_host" });
-    return { ok: false, error: "blocked_host", url };
-  }
-  const channel = getChannel(channelId ?? session.defaultChannelId ?? guessChannel(url));
+  const channel =
+    session.store.getCollectionChannel(channelId ?? session.defaultChannelId ?? guessChannel(url) ?? "") ??
+    getChannel(channelId ?? session.defaultChannelId ?? guessChannel(url) ?? "");
   const sourceId = channel?.id ?? session.defaultChannelId ?? "ccgp";
 
   if (session.allowLocalFiles && !/^https?:\/\//i.test(url)) {
@@ -228,6 +226,7 @@ async function saveIntel(session: AgentSession, url: string, reason: string) {
 }
 
 function guessChannel(url: string): string | undefined {
+  if (url.includes("wenshu.court.gov.cn")) return "wenshu";
   if (url.includes("ccgp.gov.cn")) return "ccgp";
   if (url.includes("ggzy.gov.cn")) return "ggzy";
   if (url.includes("court.gov.cn")) return "spc-guiding";

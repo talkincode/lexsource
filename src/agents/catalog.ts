@@ -18,7 +18,7 @@ export const CASE_AGENT: CollectionAgent = {
   id: "case",
   name: "案件采集",
   kind: "major_case",
-  channelIds: ["spc-guiding"],
+  channelIds: ["spc-guiding", "wenshu"],
 };
 
 export const AGENT_CATALOG: CollectionAgent[] = [TENDER_AGENT, CASE_AGENT];

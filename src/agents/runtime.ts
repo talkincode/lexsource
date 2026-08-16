@@ -5,6 +5,7 @@ import { loadAzureOpenAIConfig } from "./azure";
 import type { CompleteFn, ChatRequest, ChatResponse, ToolCall } from "./llm";
 import { channelBrief, policyFor } from "./policy";
 import { COLLECTION_TOOLS, executeTool, type AgentSession, type CachedPage } from "./tools";
+import { mcpServersFromEnv, openMcpSession, type McpSession } from "./mcp";
 import { excerpt } from "../sources/page";
 import { createHttpClient } from "../sources/http";
 import type { FetchHtml } from "../sources/types";
@@ -58,6 +59,7 @@ export async function runCollectionAgent(input: RunAgentInput): Promise<IngestRu
   const started = now();
   const sourceId = input.focusChannelId ?? input.agentId;
   let run = input.store.startIngestRun({ sourceId, trigger: input.trigger, startedAt: started.toISOString() });
+  let mcp: McpSession | null = null;
   let seq = 0;
   const record = (
     kind: "thought" | "action" | "observation" | "error",
@@ -103,9 +105,20 @@ export async function runCollectionAgent(input: RunAgentInput): Promise<IngestRu
       session.pages.set(input.primed.url, input.primed);
     }
 
+    try {
+      const specs = mcpServersFromEnv();
+      if (specs.length) mcp = await openMcpSession(specs);
+    } catch (error) {
+      record("error", {
+        output: { error: "mcp_unavailable", detail: error instanceof Error ? error.message : "mcp" },
+      });
+    }
+    const tools = mcp?.tools.length ? [...COLLECTION_TOOLS, ...mcp.tools] : COLLECTION_TOOLS;
+
     const userTask = [
       `本轮 Agent：${agent.name} (${agent.id})`,
-      `渠道：\n${channelBrief(agent.id)}`,
+      `渠道：\n${channelBrief(agent.id, input.store)}`,
+      mcp?.tools.length ? `已连接 MCP 工具：${mcp.tools.map((tool) => tool.function.name).join(", ")}` : null,
       input.focusUrl ? `优先处理这个入口：${input.focusUrl}` : "从渠道种子开始采集。",
       input.focusChannelId ? `本轮只操作渠道 ${input.focusChannelId}。` : null,
       input.primed
@@ -126,7 +139,7 @@ export async function runCollectionAgent(input: RunAgentInput): Promise<IngestRu
       steps += 1;
       const response = await complete({
         messages,
-        tools: COLLECTION_TOOLS,
+        tools,
         model: "agent",
       });
       if (response.content?.trim()) {
@@ -144,7 +157,10 @@ export async function runCollectionAgent(input: RunAgentInput): Promise<IngestRu
       for (const call of response.tool_calls) {
         const args = parseArgs(call.function.arguments);
         record("action", { tool: call.function.name, input: args });
-        const result = await executeTool(session, call.function.name, args);
+        const result =
+          mcp?.has(call.function.name)
+            ? await mcp.call(call.function.name, args)
+            : await executeTool(session, call.function.name, args);
         record("observation", { tool: call.function.name, output: result });
         messages.push({
           role: "tool",
@@ -183,6 +199,7 @@ export async function runCollectionAgent(input: RunAgentInput): Promise<IngestRu
     record("error", { output: { error: message } });
     return finish(input.store, run, started, { status: "error", failed: 1, error: message }, now);
   } finally {
+    await mcp?.close().catch(() => undefined);
     inflight.delete(lock);
   }
 }

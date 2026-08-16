@@ -21,7 +21,7 @@ import { presentIntel } from "../domain/readability";
 import { htmlToDocument } from "../sources/page";
 import { RunInProgressError, isLocalHtmlTarget, runSourceIngest } from "../pipeline/run";
 import { createHttpClient } from "../sources/http";
-import { getSource, listSources } from "../sources/registry";
+import { getSource } from "../sources/registry";
 import type { FetchHtml } from "../sources/types";
 import type { IntelStore, ListQuery } from "../store/db";
 import { dashboardHtml } from "../web/dashboard";
@@ -257,7 +257,107 @@ export function createApp(env: AppEnv) {
     return c.json({ ok: runs.every((run) => run.status !== "error"), runs });
   });
 
-  app.get("/api/sources", (c) => c.json({ sources: listSources() }));
+  app.get("/api/sources", (c) =>
+    c.json({
+      sources: env.store.listCollectionChannels().map((channel) => ({
+        id: channel.id,
+        name: channel.name,
+        kind: channel.kind,
+        region: channel.region,
+        description: channel.hints,
+      })),
+    }),
+  );
+
+  app.get("/api/channels", (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    return c.json({ channels: env.store.listCollectionChannels() });
+  });
+
+  app.post("/api/channels", async (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => null);
+    const id = typeof body?.id === "string" ? body.id.trim() : "";
+    const name = typeof body?.name === "string" ? body.name.trim() : "";
+    const kind = body?.kind === "major_case" ? "major_case" : body?.kind === "tender" ? "tender" : "";
+    const agentId = kind === "major_case" ? "case" : kind === "tender" ? "tender" : "";
+    const seedUrls = Array.isArray(body?.seedUrls)
+      ? body.seedUrls.filter((item: unknown) => typeof item === "string" && item.trim()).map((item: string) => item.trim())
+      : [];
+    if (!id || !name || !kind || !seedUrls.length) {
+      return c.json({ error: "id_name_kind_seed_required" }, 400);
+    }
+    const channel = env.store.upsertCollectionChannel(
+      {
+        id,
+        name,
+        kind,
+        agentId,
+        region: typeof body?.region === "string" ? body.region : "全国",
+        seedUrls,
+        hints: typeof body?.hints === "string" ? body.hints : "",
+        enabled: body?.enabled !== false,
+      },
+      now(),
+    );
+    return c.json({ channel }, 201);
+  });
+
+  app.put("/api/channels/:id", async (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    const current = env.store.getCollectionChannel(c.req.param("id"));
+    if (!current) return c.json({ error: "not_found" }, 404);
+    const body = await c.req.json().catch(() => null);
+    const seedUrls = Array.isArray(body?.seedUrls)
+      ? body.seedUrls.filter((item: unknown) => typeof item === "string" && item.trim()).map((item: string) => item.trim())
+      : current.seedUrls;
+    const channel = env.store.upsertCollectionChannel(
+      {
+        id: current.id,
+        name: typeof body?.name === "string" && body.name.trim() ? body.name.trim() : current.name,
+        kind: body?.kind === "major_case" || body?.kind === "tender" ? body.kind : current.kind,
+        agentId:
+          body?.kind === "major_case" ? "case" : body?.kind === "tender" ? "tender" : current.agentId,
+        region: typeof body?.region === "string" ? body.region : current.region,
+        seedUrls,
+        hints: typeof body?.hints === "string" ? body.hints : current.hints,
+        enabled: typeof body?.enabled === "boolean" ? body.enabled : current.enabled,
+      },
+      now(),
+    );
+    return c.json({ channel });
+  });
+
+  app.put("/api/channels/:id/cookie", async (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    const body = await c.req.json().catch(() => null);
+    const cookie = typeof body?.cookie === "string" ? body.cookie : "";
+    if (!cookie.trim()) return c.json({ error: "cookie_required" }, 400);
+    const channel = env.store.setCollectionChannelCookie(c.req.param("id"), cookie, now());
+    if (!channel) return c.json({ error: "not_found" }, 404);
+    return c.json({ channel });
+  });
+
+  app.delete("/api/channels/:id/cookie", (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    const channel = env.store.clearCollectionChannelCookie(c.req.param("id"), now());
+    if (!channel) return c.json({ error: "not_found" }, 404);
+    return c.json({ channel });
+  });
+
+  app.delete("/api/channels/:id", (c) => {
+    if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
+    try {
+      const deleted = env.store.deleteCollectionChannel(c.req.param("id"));
+      if (!deleted) return c.json({ error: "not_found" }, 404);
+      return c.json({ ok: true });
+    } catch (error) {
+      if (error instanceof Error && error.message === "builtin_channel") {
+        return c.json({ error: "builtin_channel" }, 400);
+      }
+      throw error;
+    }
+  });
 
   app.get("/api/ingest-runs", (c) => {
     const sourceId = c.req.query("sourceId") || undefined;
@@ -273,10 +373,12 @@ export function createApp(env: AppEnv) {
   app.post("/api/sources/:id/run", async (c) => {
     if (c.get("user").role !== "admin") return c.json({ error: "forbidden" }, 403);
     const sourceId = c.req.param("id");
-    try {
-      getSource(sourceId);
-    } catch {
-      return c.json({ error: "unknown_source" }, 404);
+    if (!env.store.getCollectionChannel(sourceId)) {
+      try {
+        getSource(sourceId);
+      } catch {
+        return c.json({ error: "unknown_source" }, 404);
+      }
     }
 
     const body = await c.req.json().catch(() => ({}));
@@ -338,7 +440,7 @@ export function createApp(env: AppEnv) {
     if (!body || typeof body.sourceId !== "string" || typeof body.sourceUrl !== "string") {
       return c.json({ error: "sourceId and sourceUrl are required" }, 400);
     }
-    const channel = getChannel(body.sourceId);
+    const channel = env.store.getCollectionChannel(body.sourceId) ?? getChannel(body.sourceId);
     if (!channel) return c.json({ error: "unknown_source" }, 404);
     const html = typeof body.html === "string" ? body.html : undefined;
     const text = typeof body.text === "string" ? body.text : undefined;

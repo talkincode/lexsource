@@ -37,7 +37,16 @@ export const CHANNELS: CollectionChannel[] = [
     agentId: "case",
     region: "全国",
     seedUrls: ["https://www.court.gov.cn/zixun/gengduo/16.html"],
-    hints: "最高法公开指导性/典型案例列表。禁止打开或入库裁判文书网 wenshu.court.gov.cn。",
+    hints: "最高法公开指导性/典型案例列表。文书网可作为补充参考源。",
+  },
+  {
+    id: "wenshu",
+    name: "中国裁判文书网",
+    kind: "major_case",
+    agentId: "case",
+    region: "全国",
+    seedUrls: ["https://wenshu.court.gov.cn/"],
+    hints: "仅作所内参考情报，低频访问。有登录墙时在设置里写入 Cookie，不要当自有判例库。",
   },
 ];
 

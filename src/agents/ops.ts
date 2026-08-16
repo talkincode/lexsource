@@ -57,7 +57,7 @@ export function llmOps(
   };
 }
 
-export function pipelineOps(): PipelineOps {
+export function pipelineOps(store?: IntelStore): PipelineOps {
   return {
     pattern: REACT_PATTERN,
     tools: COLLECTION_TOOLS.map((tool) => tool.function.name),
@@ -68,7 +68,7 @@ export function pipelineOps(): PipelineOps {
       { id: "verify", name: "验证", detail: "schema 与截止日回查。过期或验证失败不可投标。" },
       { id: "store", name: "入库", detail: "保留来源 URL 与原文，律师值班台只看筛过的成品。" },
     ],
-    channels: listChannels().map((channel) => ({
+    channels: (store?.listCollectionChannels() ?? listChannels()).map((channel) => ({
       id: channel.id,
       name: channel.name,
       kind: channel.kind,
@@ -78,17 +78,21 @@ export function pipelineOps(): PipelineOps {
   };
 }
 
-export function isAgentRunning(agent: CollectionAgent): boolean {
-  return [agent.id, ...agent.channelIds].some((lock) => isLockInflight(lock));
+export function isAgentRunning(agent: CollectionAgent, store?: IntelStore): boolean {
+  const locks = store ? sourceIdsForAgent(agent.id, store) : [agent.id, ...agent.channelIds];
+  return locks.some((lock) => isLockInflight(lock));
 }
 
-export function sourceIdsForAgent(agentId: AgentId): string[] {
+export function sourceIdsForAgent(agentId: AgentId, store?: IntelStore): string[] {
   const agent = getAgent(agentId);
-  return agent ? [agent.id, ...agent.channelIds] : [agentId];
+  const extras = store
+    ? store.listCollectionChannels().filter((channel) => channel.agentId === agentId).map((channel) => channel.id)
+    : agent?.channelIds ?? [];
+  return agent ? [agent.id, ...new Set(extras)] : [agentId];
 }
 
 export function lastRunForAgent(store: IntelStore, agentId: AgentId): IngestRun | null {
-  const ids = new Set(sourceIdsForAgent(agentId));
+  const ids = new Set(sourceIdsForAgent(agentId, store));
   return store.listIngestRuns({ limit: 80 }).find((run) => ids.has(run.sourceId)) ?? null;
 }
 
@@ -112,14 +116,14 @@ export function buildDeskOps(store: IntelStore, completeConfigured: boolean, at 
   const llm = llmOps(completeConfigured);
   return {
     llm,
-    pipeline: pipelineOps(),
+    pipeline: pipelineOps(store),
     agents: AGENT_CATALOG.map((agent) => {
       const schedule = store.getAgentSchedule(agent.id);
       const lastRun = lastRunForAgent(store, agent.id);
       return {
         ...agent,
         schedule,
-        running: isAgentRunning(agent),
+        running: isAgentRunning(agent, store),
         blocked: !llm.configured,
         due: isAgentDue(schedule, at),
         nextDueAt: nextDueAt(schedule, at),

@@ -81,7 +81,7 @@ export function presentIntel(item: IntelItem): IntelItem {
 }
 
 function presentTender(item: Tender): Tender {
-  return {
+  const next = {
     ...item,
     title: cleanTitle(item.title),
     purchaser: clipField(item.purchaser, 40) ?? item.purchaser,
@@ -91,16 +91,44 @@ function presentTender(item: Tender): Tender {
     qualification: clipField(item.qualification, 800),
     rawText: cleanPageText(item.rawText),
   };
+  return { ...next, suggestions: suggestTender(next) };
 }
 
 function presentCase(item: MajorCase): MajorCase {
-  return {
+  const next = {
     ...item,
     title: cleanTitle(item.title),
     court: clipField(item.court, 40),
     stage: clipField(item.stage, 24),
     rawText: cleanPageText(item.rawText),
   };
+  return { ...next, suggestions: suggestCase(next) };
+}
+
+export function suggestTender(item: Tender): string[] {
+  const tips: string[] = [];
+  if (item.deadlineAt) tips.push("先看投标截止日，再决定是否组队或写方案。");
+  if (item.purchaser === "未知采购人") tips.push("采购人未抽全，打开原文核对盖章主体。");
+  if (!item.budgetText) tips.push("预算未披露或未抽到，报价策略先按资格和范围估。");
+  if (item.qualification) tips.push("对照资格要求查本所执业许可、近年业绩和回避情形。");
+  if (item.serviceType === "litigation") tips.push("诉讼仲裁标要先核管辖、利益冲突和承办律师档期。");
+  if (item.serviceType === "general_counsel") tips.push("常年顾问标看服务人数、驻场和利益冲突承诺。");
+  tips.push("正文当参考情报用，关键数字以原文和附件为准。");
+  return tips.slice(0, 5);
+}
+
+export function suggestCase(item: MajorCase): string[] {
+  const tips: string[] = [];
+  if (item.caseClass === "guiding") tips.push("指导性案例可作类案检索和裁判说理的优先参考。");
+  if (item.holding) tips.push("先读裁判要旨，再对照本所在办案件的争点是否同构。");
+  if (item.statutes.length) tips.push("把涉及法条放进本案规范清单，核对条款是否仍有效。");
+  if (item.lawFirmAngles.includes("risk")) tips.push("这份材料偏风险警示，适合做内部合规提示而不是对外宣传。");
+  if (item.lawFirmAngles.includes("marketing")) tips.push("社会影响较大，对外引用只说公开信息，不写未证实细节。");
+  if (item.sourceUrl.includes("wenshu.court.gov.cn")) {
+    tips.push("文书网文本仅供所内参考，不要当本所自有判例库对外传播。");
+  }
+  tips.push("事实以裁判文书原文为准，摘要只帮助快速定位。");
+  return tips.slice(0, 5);
 }
 
 function trimDecimal(value: number): string {

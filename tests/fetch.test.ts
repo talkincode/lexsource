@@ -22,17 +22,24 @@ test("fetch sends a polite user-agent and keeps the raw html", async () => {
   expect(seen[0]).toBe(DEFAULT_USER_AGENT);
 });
 
-test("fetch refuses wenshu.court.gov.cn without calling the network", async () => {
-  let called = 0;
+test("fetch uses browser-like headers and can send a bound cookie", async () => {
+  const seen: Record<string, string | null> = {};
   const http = createHttpClient({
-    fetchImpl: async () => {
-      called += 1;
-      return new Response("nope", { status: 200 });
+    minIntervalMs: 0,
+    cookieFor: (url) => (url.includes("wenshu") ? "session=abc" : null),
+    fetchImpl: async (input, init) => {
+      const headers = new Headers(init?.headers);
+      seen.ua = headers.get("user-agent");
+      seen.sec = headers.get("sec-fetch-mode");
+      seen.cookie = headers.get("cookie");
+      return new Response("<html>ok</html>", { status: 200, headers: { "content-type": "text/html" } });
     },
   });
-  const result = await http("https://wenshu.court.gov.cn/website/wenshu/181107ANFZ0BXSK4/index.html?docId=abc");
-  expect(result).toMatchObject({ ok: false, code: "blocked_host" });
-  expect(called).toBe(0);
+  const result = await http("https://wenshu.court.gov.cn/website/wenshu/181107ANFZ0BXSK4/index.html");
+  expect(result.ok).toBe(true);
+  expect(seen.ua).toContain("Chrome/");
+  expect(seen.sec).toBe("navigate");
+  expect(seen.cookie).toBe("session=abc");
 });
 
 test("fetch rate-limits by host", async () => {

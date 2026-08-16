@@ -29,7 +29,7 @@ test("hard-failed verify does not persist a row", async () => {
     store,
     {
       sourceId: "ccgp",
-      sourceUrl: "https://wenshu.court.gov.cn/website/wenshu/181107ANFZ0BXSK4/index.html?docId=abc",
+      sourceUrl: "not-a-valid-url",
       text: "采购人：测试单位\n预算金额：10万元\n投标截止时间：2026年12月1日\n法律顾问服务",
     },
     at,

@@ -34,11 +34,8 @@ test("health and source registry are readable after login", async () => {
   const sources = await (await app.request("/api/sources", { headers })).json();
   expect(health.ok).toBe(true);
   expect(health.items).toBe(2);
-  expect(sources.sources.map((s: { id: string }) => s.id)).toEqual([
-    "ccgp",
-    "ggzy",
-    "spc-guiding",
-  ]);
+  expect(sources.sources.map((s: { id: string }) => s.id)).toContain("ccgp");
+  expect(sources.sources.map((s: { id: string }) => s.id)).toContain("wenshu");
 });
 
 test("desk shows biddable tenders and cases without making the lawyer filter", async () => {
@@ -116,6 +113,8 @@ test("logged-in dashboard is a collected-intel desk, not a subscription console"
   expect(settingsHtml).toContain("运行时刻");
   expect(settingsHtml).toContain("修改密码");
   expect(settingsHtml).toContain("新建用户");
+  expect(settingsHtml).toContain("采集渠道");
+  expect(settingsHtml).toContain("写入 Cookie");
 });
 
 test("bad ingest payload is rejected", async () => {
@@ -178,7 +177,7 @@ test("POST /api/sources/:id/run ingests from a recorded listing", async () => {
   store.close();
 });
 
-test("source run rejects unknown source, local paths, and blocked hosts", async () => {
+test("source run rejects unknown source and local paths", async () => {
   const { app, store, headers } = await authedApp("admin", {
     fetchHtml: async (url) => ({
       ok: false,
@@ -197,19 +196,6 @@ test("source run rejects unknown source, local paths, and blocked hosts", async 
     body: JSON.stringify({ url: "./tests/fixtures/tenders/ccgp-legal-counsel.html" }),
   });
   expect(local.status).toBe(400);
-
-  const blocked = await app.request("/api/sources/ccgp/run", {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify({
-      url: "https://wenshu.court.gov.cn/website/wenshu/181107ANFZ0BXSK4/index.html",
-    }),
-  });
-  const blockedBody = await blocked.json();
-  expect(blocked.status).toBe(200);
-  expect(blockedBody.run.status).toBe("error");
-  expect(blockedBody.run.error).toBe("blocked_host");
-  expect(store.count()).toBe(0);
 
   const missingSeed = await app.request("/api/sources/spc-guiding/run", { method: "POST", headers });
   const missingBody = await missingSeed.json();

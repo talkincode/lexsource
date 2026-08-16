@@ -32,7 +32,7 @@ export async function ingestDocument(
   options: IngestOptions = {},
 ): Promise<IngestResult> {
   try {
-    const channel = getChannel(input.sourceId);
+    const channel = store.getCollectionChannel(input.sourceId) ?? getChannel(input.sourceId);
     if (!channel) {
       return { ok: false, stage: "extract", error: `Unknown source: ${input.sourceId}` };
     }

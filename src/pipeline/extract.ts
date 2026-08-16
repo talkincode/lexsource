@@ -63,6 +63,7 @@ export function extractTender(doc: RawDocument): Tender {
     bidOpenAt,
     contact,
     biddable: false,
+    suggestions: [],
   };
 }
 
@@ -123,6 +124,7 @@ export function extractMajorCase(doc: RawDocument): MajorCase {
     stage: clipField(fieldAfter(/(?:审理程序|程序阶段)[：:]\s*(.+)/, text), 24),
     lawFirmAngles: angles,
     briefMarkdown,
+    suggestions: [],
   };
 }
 

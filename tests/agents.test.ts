@@ -15,7 +15,8 @@ test("collection tools and policy are agent-native, not a per-site crawler", () 
   expect(names).toEqual(["list_channels", "fetch_url", "extract_links", "save_intel", "skip", "finish"]);
   expect(policyFor("tender")).toContain("必须通过工具工作");
   expect(policyFor("tender")).toContain("save_intel");
-  expect(policyFor("case")).toContain("wenshu.court.gov.cn");
+  expect(policyFor("case")).toContain("参考情报");
+  expect(policyFor("case")).toContain("MCP Playwright");
 });
 
 test("office supplies never land unless the agent explicitly accepts", async () => {

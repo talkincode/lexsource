@@ -7,8 +7,6 @@ import {
   type Verification,
 } from "../domain/intel";
 
-const BLOCKED_HOSTS = ["wenshu.court.gov.cn", "wenshu.court.gov.cn."];
-
 export function verifyIntel(item: IntelItem, at = new Date()): IntelItem {
   const checks: Check[] = [];
 
@@ -23,13 +21,6 @@ export function verifyIntel(item: IntelItem, at = new Date()): IntelItem {
     name: "source_url",
     ok: /^https?:\/\//.test(item.sourceUrl),
     detail: item.sourceUrl,
-  });
-
-  const blocked = BLOCKED_HOSTS.some((host) => item.sourceUrl.includes(host));
-  checks.push({
-    name: "source_allowed",
-    ok: !blocked,
-    detail: blocked ? "禁止以裁判文书网作为自动采集源" : "来源不在禁采名单",
   });
 
   if (item.type === "tender") {
@@ -116,9 +107,7 @@ function verifyTender(item: Tender, at: Date): Check[] {
 }
 
 function decide(checks: Check[]): Verification {
-  const hardFailed = checks.some(
-    (check) => !check.ok && (check.name === "schema" || check.name === "source_allowed"),
-  );
+  const hardFailed = checks.some((check) => !check.ok && check.name === "schema");
   if (hardFailed) return { status: "failed", checks };
   const review = checks.some((check) => !check.ok);
   return { status: review ? "needs_review" : "verified", checks };

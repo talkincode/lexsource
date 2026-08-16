@@ -87,6 +87,7 @@ test("presentIntel repairs already-stored polluted budget text", () => {
     bidOpenAt: null,
     contact: "李警官",
     biddable: true,
+    suggestions: [],
   });
   expect(presented.type).toBe("tender");
   if (presented.type !== "tender") return;

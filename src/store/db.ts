@@ -7,6 +7,7 @@ import {
   DEFAULT_RUN_AT,
   type AgentId,
 } from "../agents/catalog";
+import { CHANNELS } from "../agents/channels";
 import { isLegalIntelItem } from "../domain/relevance";
 import {
   hashPassword,
@@ -57,6 +58,19 @@ export type IngestRunStep = {
   input: unknown;
   output: unknown;
   at: string;
+};
+
+export type StoredChannel = {
+  id: string;
+  name: string;
+  kind: "tender" | "major_case";
+  agentId: AgentId;
+  region: string;
+  seedUrls: string[];
+  hints: string;
+  enabled: boolean;
+  hasCookie: boolean;
+  updatedAt: string;
 };
 
 export type AgentSchedule = {
@@ -445,6 +459,116 @@ export class IntelStore {
     return next;
   }
 
+  listCollectionChannels(): StoredChannel[] {
+    return this.db
+      .query<ChannelRow, []>("SELECT * FROM collection_channels ORDER BY kind, id")
+      .all()
+      .map(rowToChannel);
+  }
+
+  getCollectionChannel(id: string): StoredChannel | null {
+    const row = this.db.query<ChannelRow, [string]>("SELECT * FROM collection_channels WHERE id = ?").get(id);
+    return row ? rowToChannel(row) : null;
+  }
+
+  getCollectionChannelCookie(id: string): string | null {
+    const row = this.db.query<{ cookie: string | null }, [string]>(
+      "SELECT cookie FROM collection_channels WHERE id = ?",
+    ).get(id);
+    const cookie = row?.cookie?.trim();
+    return cookie ? cookie : null;
+  }
+
+  cookieForUrl(url: string): string | null {
+    let host = "";
+    try {
+      host = new URL(url).hostname.toLowerCase();
+    } catch {
+      return null;
+    }
+    const rows = this.db.query<ChannelRow, []>("SELECT * FROM collection_channels WHERE cookie IS NOT NULL AND cookie != ''").all();
+    for (const row of rows) {
+      const seeds: string[] = JSON.parse(row.seed_urls);
+      if (seeds.some((seed) => hostMatches(seed, host)) || hostMatchesHint(row.id, host)) {
+        return row.cookie?.trim() || null;
+      }
+    }
+    return null;
+  }
+
+  upsertCollectionChannel(
+    input: {
+      id: string;
+      name: string;
+      kind: "tender" | "major_case";
+      agentId: AgentId;
+      region?: string;
+      seedUrls: string[];
+      hints?: string;
+      enabled?: boolean;
+    },
+    at = new Date(),
+  ): StoredChannel {
+    const id = input.id.trim();
+    if (!id) throw new Error("channel_id_required");
+    const current = this.getCollectionChannel(id);
+    this.db
+      .query(
+        `INSERT INTO collection_channels (id, name, kind, agent_id, region, seed_urls, hints, cookie, enabled, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name=excluded.name,
+           kind=excluded.kind,
+           agent_id=excluded.agent_id,
+           region=excluded.region,
+           seed_urls=excluded.seed_urls,
+           hints=excluded.hints,
+           enabled=excluded.enabled,
+           updated_at=excluded.updated_at`,
+      )
+      .run(
+        id,
+        input.name.trim(),
+        input.kind,
+        input.agentId,
+        input.region?.trim() || "全国",
+        JSON.stringify(input.seedUrls),
+        input.hints?.trim() || "",
+        current ? this.getCollectionChannelCookie(id) : null,
+        (input.enabled ?? current?.enabled ?? true) ? 1 : 0,
+        at.toISOString(),
+      );
+    const saved = this.getCollectionChannel(id);
+    if (!saved) throw new Error("channel_write_failed");
+    return saved;
+  }
+
+  setCollectionChannelCookie(id: string, cookie: string, at = new Date()): StoredChannel | null {
+    if (!this.getCollectionChannel(id)) return null;
+    this.db
+      .query("UPDATE collection_channels SET cookie = ?, updated_at = ? WHERE id = ?")
+      .run(cookie.trim(), at.toISOString(), id);
+    return this.getCollectionChannel(id);
+  }
+
+  clearCollectionChannelCookie(id: string, at = new Date()): StoredChannel | null {
+    if (!this.getCollectionChannel(id)) return null;
+    this.db.query("UPDATE collection_channels SET cookie = NULL, updated_at = ? WHERE id = ?").run(at.toISOString(), id);
+    return this.getCollectionChannel(id);
+  }
+
+  deleteCollectionChannel(id: string): boolean {
+    if (CHANNELS.some((channel) => channel.id === id)) throw new Error("builtin_channel");
+    const result = this.db.query("DELETE FROM collection_channels WHERE id = ?").run(id);
+    return result.changes > 0;
+  }
+
+  purgeIntel(): number {
+    const n = this.count();
+    this.db.exec("DELETE FROM intel");
+    return n;
+  }
+
   touchAgentRun(id: AgentId, at = new Date()): AgentSchedule {
     const next: AgentSchedule = {
       ...this.getAgentSchedule(id),
@@ -546,6 +670,18 @@ export class IntelStore {
         last_run_at TEXT,
         updated_at TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS collection_channels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        region TEXT NOT NULL,
+        seed_urls TEXT NOT NULL,
+        hints TEXT NOT NULL DEFAULT '',
+        cookie TEXT,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+      );
     `);
     ensureColumn(this.db, "ingest_runs", "skipped", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(this.db, "agent_schedules", "interval_days", "INTEGER NOT NULL DEFAULT 1");
@@ -563,6 +699,24 @@ export class IntelStore {
          VALUES (?, 1, ?, ?, ?, NULL, ?)`,
       )
       .run("case", DEFAULT_AGENT_INTERVAL_MS, DEFAULT_INTERVAL_DAYS, DEFAULT_RUN_AT, now);
+    for (const channel of CHANNELS) {
+      this.db
+        .query(
+          `INSERT OR IGNORE INTO collection_channels
+           (id, name, kind, agent_id, region, seed_urls, hints, cookie, enabled, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 1, ?)`,
+        )
+        .run(
+          channel.id,
+          channel.name,
+          channel.kind,
+          channel.agentId,
+          channel.region,
+          JSON.stringify(channel.seedUrls),
+          channel.hints,
+          now,
+        );
+    }
   }
 }
 
@@ -708,6 +862,51 @@ function rowToSchedule(row: AgentScheduleRow): AgentSchedule {
 
 function parseRunAtSafe(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+type ChannelRow = {
+  id: string;
+  name: string;
+  kind: string;
+  agent_id: string;
+  region: string;
+  seed_urls: string;
+  hints: string;
+  cookie: string | null;
+  enabled: number;
+  updated_at: string;
+};
+
+function rowToChannel(row: ChannelRow): StoredChannel {
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind === "major_case" ? "major_case" : "tender",
+    agentId: row.agent_id as AgentId,
+    region: row.region,
+    seedUrls: JSON.parse(row.seed_urls) as string[],
+    hints: row.hints,
+    enabled: row.enabled === 1,
+    hasCookie: Boolean(row.cookie && row.cookie.trim()),
+    updatedAt: row.updated_at,
+  };
+}
+
+function hostMatches(seed: string, host: string): boolean {
+  try {
+    const seedHost = new URL(seed).hostname.toLowerCase();
+    return host === seedHost || host.endsWith(`.${seedHost}`);
+  } catch {
+    return false;
+  }
+}
+
+function hostMatchesHint(channelId: string, host: string): boolean {
+  if (channelId === "ccgp") return host.includes("ccgp.gov.cn");
+  if (channelId === "ggzy") return host.includes("ggzy.gov.cn");
+  if (channelId === "spc-guiding") return host.includes("court.gov.cn") && !host.includes("wenshu");
+  if (channelId === "wenshu") return host.includes("wenshu.court.gov.cn");
+  return false;
 }
 
 function listWhere(query: ListQuery): { clause: string; params: Array<string | number> } {

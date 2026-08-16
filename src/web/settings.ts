@@ -31,7 +31,7 @@ export function settingsHtml(user: User): string {
 <body>
   ${headerHtml(user, "settings")}
   <main>
-    <p class="lede">采集由 ReAct Agent 按策略调用工具完成：发现页面、判定法律相关、再交给抽取与验证。这里只改日程和账号，不写死渠道解析。</p>
+    <p class="lede">采集由 Agent 按日程跑。渠道按招投标 / 案件情报分类。Cookie 只能写入、不会回显。</p>
     <div class="grid">
       <section class="card">
         <h2>修改密码</h2>
@@ -76,6 +76,31 @@ export function settingsHtml(user: User): string {
       </div>
       <div class="err" id="user-err"></div>
       <button id="new-save" type="button">创建用户</button>
+    </section>
+    <section class="card" style="margin-top:22px">
+      <h2>采集渠道</h2>
+      <p class="lede">分类决定进招标 Agent 还是案件 Agent。Cookie 用于登录墙（例如文书网），保存后无法再查看。</p>
+      <table>
+        <thead><tr><th>渠道</th><th>分类</th><th>种子</th><th>Cookie</th><th></th></tr></thead>
+        <tbody id="channels"></tbody>
+      </table>
+      <h3>新增渠道</h3>
+      <div class="row">
+        <div><label>ID</label><input id="ch-id" placeholder="jiangsu-ccgp" /></div>
+        <div><label>名称</label><input id="ch-name" placeholder="江苏政府采购网" /></div>
+        <div><label>分类</label>
+          <select id="ch-kind">
+            <option value="tender">招投标</option>
+            <option value="major_case">案件情报</option>
+          </select>
+        </div>
+      </div>
+      <label>种子 URL（一行一个）</label>
+      <input id="ch-seeds" placeholder="https://..." />
+      <label>说明</label>
+      <input id="ch-hints" />
+      <div class="err" id="ch-err"></div>
+      <button id="ch-save" type="button">保存渠道</button>
     </section>` : ""}
   </main>
   <script>
@@ -104,6 +129,34 @@ export function settingsHtml(user: User): string {
         $("sched-days").value = s.intervalDays || 1;
         $("sched-time").value = s.runAt || "08:00";
         $("sched-enabled").checked = s.enabled !== false;
+        const channels = await (await api("/api/channels")).json();
+        $("channels").innerHTML = channels.channels.map((ch) => {
+          const kind = ch.kind === "major_case" ? "案件情报" : "招投标";
+          const cookieState = ch.hasCookie ? "已绑定" : "未绑定";
+          return "<tr><td>" + ch.name + "<br/><span class='empty'>" + ch.id + "</span></td><td>" + kind +
+            "</td><td style='max-width:220px;word-break:break-all'>" + (ch.seedUrls || []).join("<br/>") +
+            "</td><td>" + cookieState +
+            "</td><td><button class='ghost bind' data-id='" + ch.id + "' type='button'>写入 Cookie</button> " +
+            (ch.hasCookie ? "<button class='ghost wipe' data-id='" + ch.id + "' type='button'>清除 Cookie</button> " : "") +
+            "</td></tr>";
+        }).join("");
+        for (const btn of document.querySelectorAll(".bind")) {
+          btn.onclick = async () => {
+            const cookie = prompt("粘贴 Cookie（保存后不会再显示）");
+            if (!cookie) return;
+            await api("/api/channels/" + btn.dataset.id + "/cookie", {
+              method: "PUT", headers: { "content-type": "application/json" },
+              body: JSON.stringify({ cookie })
+            });
+            await load();
+          };
+        }
+        for (const btn of document.querySelectorAll(".wipe")) {
+          btn.onclick = async () => {
+            await api("/api/channels/" + btn.dataset.id + "/cookie", { method: "DELETE" });
+            await load();
+          };
+        }
         const users = await (await api("/api/users")).json();
         $("users").innerHTML = users.users.map((u) =>
           "<tr><td>" + u.username + "</td><td>" + (u.role === "admin" ? "管理员" : "律师") +
@@ -143,6 +196,22 @@ export function settingsHtml(user: User): string {
         await load();
       };
       $("sched-agent").onchange = load;
+      $("ch-save").onclick = async () => {
+        $("ch-err").textContent = "";
+        const res = await api("/api/channels", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: $("ch-id").value,
+            name: $("ch-name").value,
+            kind: $("ch-kind").value,
+            seedUrls: $("ch-seeds").value.split(/\\s+/).map((s) => s.trim()).filter(Boolean),
+            hints: $("ch-hints").value
+          })
+        });
+        if (!res.ok) $("ch-err").textContent = "保存失败。";
+        await load();
+      };
       $("new-save").onclick = async () => {
         $("user-err").textContent = "";
         const res = await api("/api/users", {

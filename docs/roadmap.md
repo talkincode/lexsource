@@ -84,12 +84,20 @@ LexSource 是给律所内部使用的**自动情报系统**：由系统内的采
 
   `/api/intel` 仍可按类型、关键词过滤，但不是首页。证据：`src/store/db.ts`、`tests/api.test.ts`。
 
+- **采集渠道配置**
+
+  管理员在设置里维护招投标 / 案件情报渠道，可绑定只写不回显的 Cookie。证据：`src/store/db.ts`、`src/web/settings.ts`、`tests/channels.test.ts`。
+
+- **MCP 工具**
+
+  采集 Agent 可连接 MCP 服务器并把工具并入本轮工具表。Playwright 通过 `LEXSOURCE_MCP_PLAYWRIGHT=1` 启用。证据：`src/agents/mcp.ts`、`tests/channels.test.ts`。
+
 ## 非目标（铁律）
 
 - 不做面向公众的开放网站。未登录不得查看情报台，也不得通过 API 读取或写入情报。原因：这是律所内部系统。
 - 不做订阅推送产品（邮件、企微、webhook 订阅匹配、outbox 投递）。原因：人要的是登录后直接看已采集结果，不是再维护一套订阅规则。
 - 不把检索、过滤、关键词拼装当主交互。原因：过滤发生在采集 Agent 侧，律师不是筛选员。
-- 不自动采集中国裁判文书网，也不把该网当作默认可爬源。原因：访问受限且合规风险高。律师上传或商业授权 API 另计，可走同一入库管道。
+- 裁判文书网只作所内参考情报，不建自有全文判例库，不对外再分发文书原文。低频采集；登录墙用渠道 Cookie，不把密钥写入仓库。律师上传或商业授权 API 可走同一入库管道。
 - 不把新闻全文转成自有版权库。社会重大影响案件只保留摘要、出处和交叉确认元数据。
 - 不做投标文件编制、电子投标或采购代理。
 - 不做面向公众的法律检索产品，不与法宝/威科抢全库。
@@ -144,6 +152,7 @@ LexSource 是给律所内部使用的**自动情报系统**：由系统内的采
 | 重大案件整编 | 中 | ✅ | ✅ 未知源失败 | 须登录后可见 | ✅ 未知源不写库 | `tests/extract.test.ts`、`tests/ingest.test.ts`、`tests/api.test.ts` |
 | 验证与可投标判定 | 高 | ✅ | ✅ 过期 / 裁判文书网源 | 不适用（判定本身无角色） | ✅ 失败条目不可投标且禁源不落库 | `tests/verify.test.ts`、`tests/ingest.test.ts` |
 | 情报工作台 | 中 | ✅ 登录后默认可投标+案件，并可见 Agent 状态与 ReAct 轨迹 | ✅ 未接模型留下错误步骤且不落库 | 未登录登录页；律师可读轨迹不可开跑；管理员可开跑 | ✅ 模型未接 / 未知运行 404，不写脏数据 | `tests/api.test.ts`、`tests/auth.test.ts`、`tests/ops.test.ts`、`tests/agents.test.ts` |
+| 采集渠道配置 | 高 | ✅ 管理员新增渠道并绑定 Cookie | ✅ 内置渠道不可删；Cookie 不回显 | 管理员可写，律师 403 | ✅ 清除 Cookie 后不再随请求发出 | `tests/channels.test.ts`、`tests/auth.test.ts` |
 | 三格式导出 | 中 | ✅ | ✅ 缺失条目 404 | 须登录 | 不适用（导出不改库） | `tests/export.test.ts`、`tests/api.test.ts` |
 
 缺口与最低期望：

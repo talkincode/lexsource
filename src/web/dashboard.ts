@@ -287,6 +287,9 @@ export function dashboardHtml(user: User): string {
       } else if (item.rawText) {
         longBits.push(foldText("公告正文", item.rawText.slice(0, 2500), false));
       }
+      if (item.suggestions && item.suggestions.length) {
+        longBits.push(fold("建议补充", "<ul>" + item.suggestions.map((tip) => "<li>" + escapeHtml(tip) + "</li>").join("") + "</ul>", true));
+      }
       if (review) longBits.push(foldText("采集说明", review, false));
       longBits.push(renderChecks(item));
       return '<p class="kicker">' + (item.biddable ? "可投标" : "不可投") + " · " +
@@ -316,6 +319,7 @@ export function dashboardHtml(user: User): string {
         (item.issues && item.issues.length ? fold("争议焦点", "<ul>" + item.issues.map((i) => "<li>" + escapeHtml(i) + "</li>").join("") + "</ul>", false) : "") +
         (item.statutes && item.statutes.length ? fold("涉及法条", "<ul>" + item.statutes.map((i) => "<li>" + escapeHtml(i) + "</li>").join("") + "</ul>", false) : "") +
         (item.lawFirmAngles && item.lawFirmAngles.length ? fold("律所可用角度", "<ul>" + item.lawFirmAngles.map((a) => "<li>" + escapeHtml(ANGLES[a] || a) + "</li>").join("") + "</ul>", false) : "") +
+        (item.suggestions && item.suggestions.length ? fold("建议补充", "<ul>" + item.suggestions.map((tip) => "<li>" + escapeHtml(tip) + "</li>").join("") + "</ul>", true) : "") +
         (review ? foldText("采集说明", review, false) : "") +
         '<div class="block"><h3>来源</h3><p><a href="' + escapeHtml(item.sourceUrl) + '" target="_blank" rel="noreferrer">打开原文网站</a></p></div>';
     }

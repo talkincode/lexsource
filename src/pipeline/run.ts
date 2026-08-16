@@ -20,7 +20,7 @@ export type RunSourceInput = {
 };
 
 export async function runSourceIngest(input: RunSourceInput): Promise<IngestRun> {
-  const channel = getChannel(input.sourceId);
+  const channel = input.store.getCollectionChannel(input.sourceId) ?? getChannel(input.sourceId);
   if (!channel) {
     const now = input.now ?? (() => new Date());
     const started = now();

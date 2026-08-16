@@ -9,7 +9,9 @@ import { IntelStore } from "./store/db";
 const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.LEXSOURCE_DB ?? "var/lexsource.db";
 const store = new IntelStore(dbPath);
-const fetchHtml = createHttpClient();
+const fetchHtml = createHttpClient({
+  cookieFor: (url) => store.cookieForUrl(url),
+});
 const azure = loadAzureOpenAIConfig();
 const complete = createAzureComplete();
 const app = createApp({ store, fetchHtml, complete: complete ?? undefined });

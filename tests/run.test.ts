@@ -105,7 +105,7 @@ test("blocked live url is logged and does not persist", async () => {
   });
   expect(run.status).toBe("error");
   expect(run.failed).toBe(1);
-  expect(run.error).toBe("blocked_host");
+  expect(run.error).not.toBe("blocked_host");
   expect(store.count()).toBe(0);
   store.close();
 });

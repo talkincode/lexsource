@@ -43,6 +43,7 @@ export type HttpClientOptions = {
   timeoutMs?: number;
   now?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  cookieFor?: (url: string) => string | null | undefined;
 };
 
 export type SourceAdapter = {

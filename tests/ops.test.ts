@@ -16,7 +16,12 @@ test("pipeline ops names the ReAct tools and collection stages", () => {
     "verify",
     "store",
   ]);
-  expect(pipeline.channels.map((channel) => channel.id)).toEqual(["ccgp", "ggzy", "spc-guiding"]);
+  expect(pipeline.channels.map((channel) => channel.id)).toEqual([
+    "ccgp",
+    "ggzy",
+    "spc-guiding",
+    "wenshu",
+  ]);
 });
 
 test("next due is immediate when the agent has never run past the wall clock", () => {

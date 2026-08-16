@@ -25,11 +25,19 @@ async function main() {
     await createUser(flags);
     return;
   }
+  if (command === "purge-intel") {
+    const store = new IntelStore(dbPath);
+    const removed = store.purgeIntel();
+    store.close();
+    console.log(JSON.stringify({ ok: true, removed }));
+    return;
+  }
   console.error("Usage: bun src/cli.ts ingest-fixtures");
   console.error(
     "       bun src/cli.ts ingest --source <ccgp|ggzy|spc-guiding> --url <https://...|./file.html>",
   );
   console.error("       bun src/cli.ts create-user --username <name> --password <secret> --role <admin|lawyer>");
+  console.error("       bun src/cli.ts purge-intel");
   process.exit(1);
 }
 

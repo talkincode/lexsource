@@ -2,17 +2,26 @@ import { nowIso } from "../domain/intel";
 import type { FetchHtml, FetchResult, HttpClientOptions } from "./types";
 
 export const DEFAULT_USER_AGENT =
-  "LexSource/0.1 (+https://github.com/talkincode/lexsource; law-firm intel; polite)";
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-const BLOCKED_HOSTS = ["wenshu.court.gov.cn"];
+export const BROWSER_FETCH_HEADERS: Record<string, string> = {
+  "user-agent": DEFAULT_USER_AGENT,
+  accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+  "accept-language": "zh-CN,zh;q=0.9,en;q=0.8",
+  "cache-control": "max-age=0",
+  "upgrade-insecure-requests": "1",
+  "sec-ch-ua": '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+  "sec-ch-ua-mobile": "?0",
+  "sec-ch-ua-platform": '"Windows"',
+  "sec-fetch-dest": "document",
+  "sec-fetch-mode": "navigate",
+  "sec-fetch-site": "none",
+  "sec-fetch-user": "?1",
+};
 
-export function isBlockedHost(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    return BLOCKED_HOSTS.some((blocked) => host === blocked || host.endsWith(`.${blocked}`));
-  } catch {
-    return false;
-  }
+/** Kept for callers; LexSource no longer hard-blocks any public court host. */
+export function isBlockedHost(_url: string): boolean {
+  return false;
 }
 
 export function recordedFetch(
@@ -40,6 +49,7 @@ export function createHttpClient(options: HttpClientOptions = {}): FetchHtml {
   const now = options.now ?? (() => Date.now());
   const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const lastByHost = new Map<string, number>();
+  const cookieFor = options.cookieFor;
 
   return async function fetchHtml(url: string): Promise<FetchResult> {
     let parsed: URL;
@@ -53,15 +63,6 @@ export function createHttpClient(options: HttpClientOptions = {}): FetchHtml {
       return { ok: false, code: "invalid_url", message: "url_must_be_http", sourceUrl: stripQuery(url) };
     }
 
-    if (isBlockedHost(url)) {
-      return {
-        ok: false,
-        code: "blocked_host",
-        message: "blocked_host",
-        sourceUrl: stripQuery(url),
-      };
-    }
-
     const host = parsed.hostname.toLowerCase();
     const last = lastByHost.get(host);
     if (last != null && minIntervalMs > 0) {
@@ -73,11 +74,12 @@ export function createHttpClient(options: HttpClientOptions = {}): FetchHtml {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      const cookie = cookieFor?.(url)?.trim();
       const response = await fetchImpl(url, {
         headers: {
+          ...BROWSER_FETCH_HEADERS,
           "user-agent": userAgent,
-          accept: "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8",
-          "accept-language": "zh-CN,zh;q=0.9",
+          ...(cookie ? { cookie } : {}),
         },
         redirect: "follow",
         signal: controller.signal,
