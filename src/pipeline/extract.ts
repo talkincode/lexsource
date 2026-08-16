@@ -14,6 +14,7 @@ import {
   parseBudgetYuan,
   parseChineseDate,
 } from "../domain/parse";
+import { cleanPageText, cleanTitle, clipField } from "../domain/readability";
 import type { RawDocument } from "../sources/types";
 
 export function extractIntel(doc: RawDocument, kind: "tender" | "major_case"): IntelItem {
@@ -22,23 +23,23 @@ export function extractIntel(doc: RawDocument, kind: "tender" | "major_case"): I
 }
 
 export function extractTender(doc: RawDocument): Tender {
-  const text = doc.text;
-  const title = doc.titleHint ?? firstLine(text);
+  const text = cleanPageText(doc.text);
+  const title = cleanTitle(doc.titleHint ?? firstLine(text));
   const purchaser =
-    fieldAfter(/(?:采购人|招标人|采购单位)[：:]\s*(.+)/, text) ?? "未知采购人";
+    clipField(fieldAfter(/(?:采购人|招标人|采购单位)[：:]\s*(.+)/, text), 40) ?? "未知采购人";
   const projectName =
-    fieldAfter(/(?:项目名称|采购项目)[：:]\s*(.+)/, text) ?? title;
+    clipField(fieldAfter(/(?:项目名称|采购项目)[：:]\s*(.+)/, text), 80) ?? title;
   const budgetField = fieldAfter(/(?:预算金额|采购预算|预算)[：:]\s*(.+)/, text);
-  const { amount, text: budgetText } = parseBudgetYuan(budgetField);
+  const { amount, text: budgetText } = parseBudgetYuan(clipField(budgetField, 48) ?? budgetField);
   const deadlineAt = parseChineseDate(
-    fieldAfter(/(?:投标截止时间|递交截止时间|报名截止时间|截止时间)[：:]\s*(.+)/, text),
+    clipField(fieldAfter(/(?:投标截止时间|递交截止时间|报名截止时间|截止时间)[：:]\s*(.+)/, text), 40),
   );
-  const bidOpenAt = parseChineseDate(fieldAfter(/(?:开标时间)[：:]\s*(.+)/, text));
+  const bidOpenAt = parseChineseDate(clipField(fieldAfter(/(?:开标时间)[：:]\s*(.+)/, text), 40));
   const publishedAt =
-    parseChineseDate(fieldAfter(/(?:发布日期|公告时间|发布时间)[：:]\s*(.+)/, text)) ??
+    parseChineseDate(clipField(fieldAfter(/(?:发布日期|公告时间|发布时间)[：:]\s*(.+)/, text), 40)) ??
     doc.fetchedAt;
-  const qualification = fieldAfter(/(?:资格要求|投标人资格|申请人资格)[：:]\s*(.+)/, text);
-  const contact = fieldAfter(/(?:联系方式|联系人)[：:]\s*(.+)/, text);
+  const qualification = clipField(fieldAfter(/(?:资格要求|投标人资格|申请人资格)[：:]\s*(.+)/, text), 800);
+  const contact = clipField(fieldAfter(/(?:联系方式|联系人)[：:]\s*(.+)/, text), 48);
 
   return {
     type: "tender",
@@ -66,13 +67,13 @@ export function extractTender(doc: RawDocument): Tender {
 }
 
 export function extractMajorCase(doc: RawDocument): MajorCase {
-  const text = doc.text;
-  const title = doc.titleHint ?? firstLine(text);
+  const text = cleanPageText(doc.text);
+  const title = cleanTitle(doc.titleHint ?? firstLine(text));
   const summary =
     fieldAfter(/(?:裁判要点|基本案情|案情摘要)[：:]\s*([\s\S]+?)(?:\n\s*(?:裁判理由|相关法条|指导意义)|$)/, text) ??
     text.slice(0, 400);
-  const holding = fieldAfter(/(?:裁判要点)[：:]\s*(.+)/, text);
-  const court = fieldAfter(/(?:审理法院|法院)[：:]\s*(.+)/, text);
+  const holding = clipField(fieldAfter(/(?:裁判要点)[：:]\s*(.+)/, text), 400);
+  const court = clipField(fieldAfter(/(?:审理法院|法院)[：:]\s*(.+)/, text), 40);
   const statutes = collectStatutes(text);
   const issues = collectIssues(text);
   const caseClass = classifyCaseClass(title, text);
@@ -119,7 +120,7 @@ export function extractMajorCase(doc: RawDocument): MajorCase {
     issues,
     statutes,
     holding,
-    stage: fieldAfter(/(?:审理程序|程序阶段)[：:]\s*(.+)/, text),
+    stage: clipField(fieldAfter(/(?:审理程序|程序阶段)[：:]\s*(.+)/, text), 24),
     lawFirmAngles: angles,
     briefMarkdown,
   };

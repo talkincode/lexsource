@@ -17,6 +17,7 @@ import { toMarkdown } from "../export/markdown";
 import { toPdf } from "../export/pdf";
 import { ingestDocument } from "../pipeline/ingest";
 import { intelId } from "../domain/intel";
+import { presentIntel } from "../domain/readability";
 import { htmlToDocument } from "../sources/page";
 import { RunInProgressError, isLocalHtmlTarget, runSourceIngest } from "../pipeline/run";
 import { createHttpClient } from "../sources/http";
@@ -192,7 +193,8 @@ export function createApp(env: AppEnv) {
     const desk = env.store.desk();
     const ops = buildDeskOps(env.store, Boolean(complete), now());
     return c.json({
-      ...desk,
+      tenders: desk.tenders.map(presentIntel),
+      cases: desk.cases.map(presentIntel),
       agents: ops.agents,
       runs: env.store.listIngestRuns({ limit: 20 }),
       ops,
@@ -303,20 +305,31 @@ export function createApp(env: AppEnv) {
   });
 
   app.get("/api/intel", (c) => {
+    const page = Number(c.req.query("page") || 0);
+    const pageSize = Number(c.req.query("pageSize") || 0);
     const query: ListQuery = {
       type: asEnum(c.req.query("type"), ["tender", "major_case"]),
       region: c.req.query("region") || undefined,
       q: c.req.query("q") || undefined,
       sourceId: c.req.query("sourceId") || undefined,
       biddable: c.req.query("biddable") === "1" ? true : undefined,
+      page: Number.isFinite(page) && page > 0 ? page : undefined,
+      pageSize: Number.isFinite(pageSize) && pageSize > 0 ? pageSize : undefined,
     };
-    return c.json({ items: env.store.list(query) });
+    const items = env.store.list(query).map(presentIntel);
+    return c.json({
+      items,
+      total: env.store.countList(query),
+      page: query.page ?? 1,
+      pageSize: query.pageSize ?? items.length,
+      regions: env.store.listRegions(query.type),
+    });
   });
 
   app.get("/api/intel/:id", (c) => {
     const item = env.store.get(c.req.param("id"));
     if (!item) return c.json({ error: "not_found" }, 404);
-    return c.json({ item });
+    return c.json({ item: presentIntel(item) });
   });
 
   app.post("/api/intel/ingest", async (c) => {

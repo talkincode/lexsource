@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { nowIso } from "../domain/intel";
+import { cleanPageText, cleanTitle } from "../domain/readability";
 import type { RawDocument } from "./types";
 
 export type PageLink = { url: string; text: string };
@@ -12,12 +13,15 @@ export function htmlToDocument(input: {
 }): RawDocument {
   const html = input.html ?? "";
   const $ = html ? cheerio.load(html) : null;
-  $?.("script, style, noscript").remove();
-  const title =
-    $?.("h1, title").first().text().replace(/\s+/g, " ").trim() ||
-    input.text?.split("\n").map((line) => line.trim()).find(Boolean) ||
-    "未命名页面";
-  const text = normalizeText($?.("body").text() ?? input.text ?? "");
+  $?.("script, style, noscript, nav, header, footer, aside, iframe, form").remove();
+  const title = cleanTitle(
+    $?.("h1, .vF_detail_title, .title, title").first().text().replace(/\s+/g, " ").trim() ||
+      input.text?.split("\n").map((line) => line.trim()).find(Boolean) ||
+      "未命名页面",
+  );
+  const main = $?.(".vF_detail_content, .vF_detail, article, main, #content, .content").first();
+  const raw = (main && main.text().trim().length > 40 ? main.text() : $?.("body").text()) ?? input.text ?? "";
+  const text = cleanPageText(normalizeText(raw));
   return {
     sourceId: input.sourceId,
     sourceUrl: input.sourceUrl,

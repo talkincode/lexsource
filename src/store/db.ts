@@ -24,6 +24,8 @@ export type ListQuery = {
   q?: string;
   biddable?: boolean;
   sourceId?: string;
+  page?: number;
+  pageSize?: number;
 };
 
 export type IngestTrigger = "cli" | "api" | "schedule";
@@ -124,32 +126,36 @@ export class IntelStore {
   }
 
   list(query: ListQuery = {}): IntelItem[] {
-    const where: string[] = [];
-    const params: Array<string | number> = [];
-    if (query.type) {
-      where.push("type = ?");
-      params.push(query.type);
+    const { clause, params } = listWhere(query);
+    let sql = `SELECT payload FROM intel ${clause} ORDER BY published_at DESC, ingested_at DESC`;
+    if (query.pageSize && query.pageSize > 0) {
+      const size = Math.min(Math.max(Math.round(query.pageSize), 1), 50);
+      const page = Math.max(Math.round(query.page ?? 1), 1);
+      sql += " LIMIT ? OFFSET ?";
+      params.push(size, (page - 1) * size);
     }
-    if (query.region) {
-      where.push("region = ?");
-      params.push(query.region);
-    }
-    if (query.sourceId) {
-      where.push("source_id = ?");
-      params.push(query.sourceId);
-    }
-    if (query.biddable === true) {
-      where.push("biddable = 1");
-    }
-    if (query.q) {
-      where.push("(title LIKE ? OR payload LIKE ?)");
-      params.push(`%${query.q}%`, `%${query.q}%`);
-    }
-    const sql = `SELECT payload FROM intel ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY published_at DESC, ingested_at DESC`;
     return this.db
       .query<{ payload: string }, Array<string | number>>(sql)
       .all(...params)
       .map((row) => IntelItemSchema.parse(JSON.parse(row.payload)));
+  }
+
+  countList(query: ListQuery = {}): number {
+    const { clause, params } = listWhere(query);
+    return (
+      this.db
+        .query<{ n: number }, Array<string | number>>(`SELECT COUNT(*) AS n FROM intel ${clause}`)
+        .get(...params)?.n ?? 0
+    );
+  }
+
+  listRegions(type?: IntelType): string[] {
+    const rows = type
+      ? this.db.query<{ region: string }, [string]>(
+          "SELECT DISTINCT region FROM intel WHERE type = ? ORDER BY region",
+        ).all(type)
+      : this.db.query<{ region: string }, []>("SELECT DISTINCT region FROM intel ORDER BY region").all();
+    return rows.map((row) => row.region).filter(Boolean);
   }
 
   desk(): { tenders: IntelItem[]; cases: IntelItem[] } {
@@ -702,4 +708,32 @@ function rowToSchedule(row: AgentScheduleRow): AgentSchedule {
 
 function parseRunAtSafe(value: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function listWhere(query: ListQuery): { clause: string; params: Array<string | number> } {
+  const where: string[] = [];
+  const params: Array<string | number> = [];
+  if (query.type) {
+    where.push("type = ?");
+    params.push(query.type);
+  }
+  if (query.region) {
+    where.push("region = ?");
+    params.push(query.region);
+  }
+  if (query.sourceId) {
+    where.push("source_id = ?");
+    params.push(query.sourceId);
+  }
+  if (query.biddable === true) {
+    where.push("biddable = 1");
+  }
+  if (query.q) {
+    where.push("(title LIKE ? OR payload LIKE ?)");
+    params.push(`%${query.q}%`, `%${query.q}%`);
+  }
+  return {
+    clause: where.length ? `WHERE ${where.join(" AND ")}` : "",
+    params,
+  };
 }

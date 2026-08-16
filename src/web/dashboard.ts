@@ -46,6 +46,12 @@ export function dashboardHtml(user: User): string {
     .channels, .list, .preview { padding: 20px 22px 36px; overflow-y: auto; min-width: 0; }
     .channels { background: #efe6cf; border-right: 1px solid var(--line); }
     .preview { border-left: 1px solid var(--line); background: var(--panel); }
+    .finder { display: grid; grid-template-columns: 1fr 7.5em auto; gap: 8px; margin: 0 0 14px; }
+    .finder input, .finder select, .finder button { width: auto; margin: 0; padding: 7px 10px; }
+    .finder button { background: var(--ink); color: var(--paper); }
+    .pager { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; font-size: 13px; color: var(--mute); }
+    .pager button { width: auto; margin: 0; padding: 6px 10px; background: var(--panel); color: var(--ink); }
+    .pager button:disabled { opacity: .4; }
     .tabs { display: flex; gap: 0; margin: 0 0 12px; border-bottom: 1px solid var(--line); }
     .tabs button {
       width: auto; margin: 0; border: 0; border-bottom: 2px solid transparent;
@@ -65,10 +71,9 @@ export function dashboardHtml(user: User): string {
     .kicker { color: var(--brass-deep); font-size: 12px; letter-spacing: .08em; margin: 0 0 8px; }
     .preview h2 { font-size: 26px; line-height: 1.35; margin: 0 0 12px; }
     .exports { margin: 0 0 18px; font-size: 14px; }
-    .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 18px; margin: 0 0 22px; }
-    .facts div { border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-    .facts dt { font-size: 11px; letter-spacing: .12em; color: var(--brass-deep); margin: 0 0 4px; }
-    .facts dd { margin: 0; font-size: 15px; line-height: 1.45; }
+    .facts { display: grid; grid-template-columns: 6.2em 1fr; gap: 10px 16px; margin: 0 0 22px; }
+    .facts dt { font-size: 12px; color: var(--brass-deep); padding-top: 2px; }
+    .facts dd { margin: 0; font-size: 15px; line-height: 1.5; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
     .block { margin: 0 0 16px; }
     .block h3 { margin-top: 0; }
     .block p, .block li { line-height: 1.7; font-size: 15px; }
@@ -110,7 +115,13 @@ export function dashboardHtml(user: User): string {
         <button class="on" id="tab-tender" type="button">招投标</button>
         <button id="tab-case" type="button">案件情报</button>
       </div>
+      <form class="finder" id="finder">
+        <input id="q" type="search" placeholder="关键字" autocomplete="off" />
+        <select id="region"><option value="">全部地区</option></select>
+        <button id="find" type="submit">查找</button>
+      </form>
       <div id="items"></div>
+      <div class="pager" id="pager"></div>
     </section>
     <article class="preview" id="detail">选择一条情报，查看要点和导出。</article>
   </main>
@@ -135,6 +146,9 @@ export function dashboardHtml(user: User): string {
     let desk = { tenders: [], cases: [], agents: [], runs: [], ops: null };
     let tab = "tender";
     let pollTimer = null;
+    let page = 1;
+    const pageSize = 10;
+    let listState = { items: [], total: 0, page: 1, pageSize, regions: [] };
     const pendingRuns = new Set();
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>\"']/g, (ch) => ({
@@ -199,7 +213,7 @@ export function dashboardHtml(user: User): string {
         '</span></div>';
     }
     function fact(label, value) {
-      return '<div><dt>' + escapeHtml(label) + '</dt><dd>' + value + '</dd></div>';
+      return '<dt>' + escapeHtml(label) + '</dt><dd>' + value + '</dd>';
     }
     function paragraphs(text) {
       return String(text || "")
@@ -218,40 +232,52 @@ export function dashboardHtml(user: User): string {
       if (!text) return "";
       return fold(title, paragraphs(text), open);
     }
-    function shortEnough(text) {
-      return String(text || "").trim().length > 0 && String(text).trim().length <= 48;
-    }
     function reviewOf(item) {
       const check = (item.verification && item.verification.checks || []).find((c) => c.name === "agent_review");
       return check ? check.detail : "";
     }
+    function sectionsOf(text) {
+      const cleaned = String(text || "").trim();
+      if (!cleaned) return [];
+      const chunks = cleaned.split(/(?=[一二三四五六七八九十]{1,3}、)/);
+      return chunks.map((chunk) => {
+        const trimmed = chunk.trim();
+        const match = trimmed.match(/^([一二三四五六七八九十]{1,3}、[^\\n。]{0,24})[。\\s]*(.*)$/s);
+        if (match) return { title: match[1].trim(), body: (match[2] || "").trim() };
+        return { title: "公告内容", body: trimmed };
+      }).filter((section) => section.body.length >= 4);
+    }
     function renderTender(item) {
       const review = reviewOf(item);
-      const shortFacts = [];
-      if (shortEnough(item.purchaser)) shortFacts.push(fact("采购人", escapeHtml(item.purchaser)));
-      if (shortEnough(item.projectName) && item.projectName !== item.title) {
-        shortFacts.push(fact("项目", escapeHtml(item.projectName)));
+      const facts = [
+        fact("采购人", escapeHtml(item.purchaser || "未披露")),
+        fact("预算", escapeHtml(item.budgetText || "未披露")),
+        fact("投标截止", escapeHtml(fmtTime(item.deadlineAt))),
+        fact("开标时间", escapeHtml(fmtTime(item.bidOpenAt))),
+        fact("联系人", escapeHtml(item.contact || "未披露"))
+      ];
+      if (item.projectName && item.projectName !== item.title) {
+        facts.splice(1, 0, fact("项目", escapeHtml(item.projectName)));
       }
-      shortFacts.push(fact("预算", escapeHtml(item.budgetText || (item.budget != null ? item.budget + " 元" : "未披露"))));
-      shortFacts.push(fact("投标截止", escapeHtml(fmtTime(item.deadlineAt))));
-      shortFacts.push(fact("开标时间", escapeHtml(fmtTime(item.bidOpenAt))));
-      shortFacts.push(fact("联系人", escapeHtml(item.contact || "未披露")));
       const longBits = [];
-      if (!shortEnough(item.purchaser) && item.purchaser) longBits.push(foldText("采购人", item.purchaser, false));
-      if (!shortEnough(item.projectName) && item.projectName && item.projectName !== item.title) {
-        longBits.push(foldText("项目说明", item.projectName, false));
-      }
       if (item.qualification) longBits.push(foldText("资格要求", item.qualification, false));
+      const sections = sectionsOf(item.rawText);
+      if (sections.length > 1) {
+        longBits.push(sections.map((section, index) =>
+          foldText(section.title, section.body, index === 0)
+        ).join(""));
+      } else if (item.rawText) {
+        longBits.push(foldText("公告正文", item.rawText.slice(0, 2500), false));
+      }
       if (review) longBits.push(foldText("采集说明", review, false));
       longBits.push(renderChecks(item));
-      if (item.rawText) longBits.push(foldText("原文摘录", item.rawText.slice(0, 2500), false));
       return '<p class="kicker">' + (item.biddable ? "可投标" : "不可投") + " · " +
         escapeHtml(item.region) + " · " + escapeHtml(SERVICE[item.serviceType] || item.serviceType) + "</p>" +
         "<h2>" + escapeHtml(item.title) + "</h2>" +
         "<p class='exports'><a href='/api/intel/" + item.id + "/export.md'>Markdown</a> · " +
         "<a href='/api/intel/" + item.id + "/export.docx'>Word</a> · " +
         "<a href='/api/intel/" + item.id + "/export.pdf'>PDF</a></p>" +
-        '<dl class="facts">' + shortFacts.join("") + "</dl>" +
+        '<dl class="facts">' + facts.join("") + "</dl>" +
         longBits.join("") +
         '<div class="block"><h3>来源</h3><p><a href="' + escapeHtml(item.sourceUrl) + '" target="_blank" rel="noreferrer">打开原文网站</a></p></div>';
     }
@@ -354,15 +380,51 @@ export function dashboardHtml(user: User): string {
           (link ? "<br/>" + link : "") + "</div></div>";
       }).join("") || '<p class="empty">还没有登记采集渠道。</p>';
     }
+    function paintRegions() {
+      const current = $("region").value;
+      const regions = listState.regions || [];
+      $("region").innerHTML = '<option value="">全部地区</option>' +
+        regions.map((region) => '<option value="' + escapeHtml(region) + '">' + escapeHtml(region) + "</option>").join("");
+      if (regions.includes(current)) $("region").value = current;
+    }
+    function paintPager() {
+      const totalPages = Math.max(1, Math.ceil((listState.total || 0) / pageSize));
+      $("pager").innerHTML =
+        '<button type="button" id="prev-page"' + (page <= 1 ? " disabled" : "") + ">上一页</button>" +
+        "<span>第 " + page + " / " + totalPages + " 页 · 共 " + (listState.total || 0) + " 条</span>" +
+        '<button type="button" id="next-page"' + (page >= totalPages ? " disabled" : "") + ">下一页</button>";
+      $("prev-page").onclick = () => { if (page > 1) { page -= 1; loadList(); } };
+      $("next-page").onclick = () => { if (page < totalPages) { page += 1; loadList(); } };
+    }
     function paintList() {
-      const rows = tab === "tender" ? desk.tenders : desk.cases;
+      const rows = listState.items || [];
       $("items").innerHTML = rows.map(itemCard).join("") ||
         (tab === "tender"
-          ? '<p class="empty">暂无招投标情报。系统会按日程继续采集。</p>'
-          : '<p class="empty">暂无案件情报。</p>');
+          ? '<p class="empty">没有符合条件的招投标情报。</p>'
+          : '<p class="empty">没有符合条件的案件情报。</p>');
       for (const node of document.querySelectorAll(".item")) {
         node.addEventListener("click", () => show(node.dataset.id, node));
       }
+      paintRegions();
+      paintPager();
+    }
+    async function loadList() {
+      const params = new URLSearchParams();
+      if (tab === "tender") {
+        params.set("type", "tender");
+        params.set("biddable", "1");
+      } else {
+        params.set("type", "major_case");
+      }
+      const q = $("q").value.trim();
+      const region = $("region").value;
+      if (q) params.set("q", q);
+      if (region) params.set("region", region);
+      params.set("page", String(page));
+      params.set("pageSize", String(pageSize));
+      const data = await (await api("/api/intel?" + params.toString())).json();
+      listState = data;
+      paintList();
     }
     function paintOps() {
       const agents = desk.agents || [];
@@ -392,7 +454,7 @@ export function dashboardHtml(user: User): string {
       $("health").textContent = "招投标 " + desk.tenders.length + " · 案件 " + desk.cases.length;
       paintOps();
       paintChannels();
-      paintList();
+      await loadList();
       const running = (desk.agents || []).some((a) => a.running) || pendingRuns.size > 0;
       clearTimeout(pollTimer);
       pollTimer = setTimeout(loadDesk, running ? 2500 : 20000);
@@ -406,15 +468,22 @@ export function dashboardHtml(user: User): string {
     }
     $("tab-tender").onclick = () => {
       tab = "tender";
+      page = 1;
       $("tab-tender").classList.add("on");
       $("tab-case").classList.remove("on");
-      paintList();
+      loadList();
     };
     $("tab-case").onclick = () => {
       tab = "case";
+      page = 1;
       $("tab-case").classList.add("on");
       $("tab-tender").classList.remove("on");
-      paintList();
+      loadList();
+    };
+    $("finder").onsubmit = (event) => {
+      event.preventDefault();
+      page = 1;
+      loadList();
     };
     $("logout").onclick = async () => {
       await api("/api/auth/logout", { method: "POST" });

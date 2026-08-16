@@ -54,6 +54,25 @@ test("desk shows biddable tenders and cases without making the lawyer filter", a
   expect(cases.items).toHaveLength(1);
 });
 
+test("intel list supports region, keyword and pagination", async () => {
+  const { app, headers } = await seededApp();
+  const page = await (await app.request("/api/intel?type=tender&biddable=1&page=1&pageSize=1", { headers })).json();
+  expect(page.items).toHaveLength(1);
+  expect(page.total).toBe(1);
+  expect(page.page).toBe(1);
+  expect(page.regions).toContain("北京");
+
+  const byRegion = await (await app.request("/api/intel?type=tender&region=北京", { headers })).json();
+  expect(byRegion.items).toHaveLength(1);
+  const missRegion = await (await app.request("/api/intel?type=tender&region=海南", { headers })).json();
+  expect(missRegion.items).toHaveLength(0);
+
+  const byWord = await (await app.request("/api/intel?type=tender&q=法律顾问", { headers })).json();
+  expect(byWord.items).toHaveLength(1);
+  const missWord = await (await app.request("/api/intel?type=tender&q=半导体", { headers })).json();
+  expect(missWord.items).toHaveLength(0);
+});
+
 test("export endpoints return three formats", async () => {
   const { app, tender, headers } = await seededApp();
   const created = await tender.json();
@@ -78,6 +97,9 @@ test("logged-in dashboard is a collected-intel desk, not a subscription console"
   expect(html).toContain("/settings");
   expect(html).toContain("采集值班台");
   expect(html).toContain("采集渠道");
+  expect(html).toContain("查找");
+  expect(html).toContain("全部地区");
+  expect(html).toContain("上一页");
   expect(html).not.toContain("现在还能投");
   expect(html).not.toContain("所里能用的案件");
   expect(html).not.toContain("本轮步骤");

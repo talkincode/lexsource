@@ -38,19 +38,19 @@ export function parseBudgetYuan(input: string | null | undefined): {
   const wan = text.match(/([\d,.]+)\s*万元/);
   if (wan?.[1]) {
     const n = Number(wan[1].replace(/,/g, ""));
-    return { amount: Number.isFinite(n) ? Math.round(n * 10_000) : null, text };
+    return { amount: Number.isFinite(n) ? Math.round(n * 10_000) : null, text: `${wan[1]}万元` };
   }
   const yuan = text.match(/([\d,.]+)\s*元/);
   if (yuan?.[1]) {
     const n = Number(yuan[1].replace(/,/g, ""));
-    return { amount: Number.isFinite(n) ? Math.round(n) : null, text };
+    return { amount: Number.isFinite(n) ? Math.round(n) : null, text: `${yuan[1]}元` };
   }
   const bare = text.match(/([\d,.]+)/);
   if (bare?.[1] && /万/.test(text)) {
     const n = Number(bare[1].replace(/,/g, ""));
-    return { amount: Number.isFinite(n) ? Math.round(n * 10_000) : null, text };
+    return { amount: Number.isFinite(n) ? Math.round(n * 10_000) : null, text: `${bare[1]}万` };
   }
-  return { amount: null, text };
+  return { amount: null, text: text.length > 24 ? text.slice(0, 24) : text };
 }
 
 export function fieldAfter(label: RegExp, text: string): string | null {
