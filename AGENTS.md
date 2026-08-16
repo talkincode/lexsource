@@ -35,6 +35,13 @@ bun --hot src/server.ts
 
 默认地址：`http://127.0.0.1:8787`。
 
+## Cursor Cloud specific instructions
+
+- Bun 运行时由 VM 快照提供（已装在 `~/.bun` 并软链到 `/usr/local/bin/bun`），启动脚本只跑 `bun install --frozen-lockfile`。不要在这里改用 Node/npm。
+- 没有独立 lint 脚本；`bun test` 就是校验闸门。`tsc --noEmit` 只在 `tests/` 里报宽松类型错误（`response.json()` 的 `unknown`、`fetch` 缺 `preconnect`），属既有噪声，不要当门禁，也不要为此改代码。
+- 启动 dev server（`bun --hot src/server.ts`）前，本地库目录 `var/`（gitignore）可能是空的。先跑 `bun src/cli.ts ingest-fixtures` 灌入示例数据，情报台才有内容；DB 路径由 `LEXSOURCE_DB` 决定，默认 `var/lexsource.db`。
+- 手工验证端到端：`POST /api/intel/ingest` 入库 → `GET /api/intel?type=tender&biddable=1` 查可投标 → `GET /api/intel/:id/export.md` 导出。命令样例见 README。
+
 ## 验收矩阵（硬性规定）
 
 完整矩阵只维护在 [docs/roadmap.md](docs/roadmap.md#验收矩阵业务能力覆盖矩阵)。以下五条是 MUST：
