@@ -2,8 +2,10 @@
 
 本目录就是工作区里的「交付」文件夹的英文对应目录。
 
-当前对照修改稿（按「原文序号+内容 → 风险点 → 修改后条文」）：
+当前对照修改稿 Word：
 
-**desheng-clause-redline.md**
+**desheng-clause-redline.docx**
+
+中文文件名（同一份）：见 `交付/承包协议书与内部合作协议对照修改稿.docx`
 
 历次稿：desheng-contract-review.docx / desheng-contract-review.md
